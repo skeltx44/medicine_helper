@@ -48,14 +48,95 @@
         </main>
     </div>
 
+    <script src="config.js"></script>
     <script>
+        const API_BASE_URL = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'https://sibaljom.onrender.com/api';
+        
         // 현재 날짜 가져오기
         const now = new Date();
         let currentYear = now.getFullYear();
         let currentMonth = now.getMonth();
+        let dailyStatuses = {}; // 날짜별 복용 상태 저장
+
+        // 일일 복용 상태 불러오기
+        async function loadDailyStatuses(year, month) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/daily-status?year=${year}&month=${month + 1}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    dailyStatuses = data.statuses || {};
+                }
+            } catch (error) {
+                console.error('일일 상태 불러오기 오류:', error);
+            }
+        }
+
+        // 저녁 7시 체크 (페이지 로드 시 또는 주기적으로)
+        async function checkEveningStatus() {
+            const now = new Date();
+            if (now.getHours() >= 19) {
+                try {
+                    await fetch(`${API_BASE_URL}/daily-status/check-evening`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        }
+                    });
+                    // 상태 다시 불러오기
+                    await loadDailyStatuses(currentYear, currentMonth);
+                    // 달력 다시 그리기
+                    generateCalendar(currentYear, currentMonth);
+                } catch (error) {
+                    console.error('저녁 상태 확인 오류:', error);
+                }
+            }
+        }
+
+        // 날짜에 O/X 표시 추가
+        function addStatusMark(markContainer, status) {
+            if (!status) return;
+            
+            markContainer.innerHTML = '';
+            
+            if (status === 'O') {
+                const circleMark = document.createElement('div');
+                circleMark.className = 'mark-circle';
+                circleMark.textContent = '○';
+                circleMark.style.fontSize = '28px';
+                circleMark.style.color = '#4CAF50';
+                circleMark.style.fontWeight = '900';
+                circleMark.style.textAlign = 'center';
+                circleMark.style.lineHeight = '1';
+                circleMark.style.display = 'block';
+                circleMark.style.width = '100%';
+                circleMark.style.margin = '0';
+                circleMark.style.padding = '0';
+                circleMark.style.webkitTextStroke = '1px #4CAF50';
+                circleMark.style.textStroke = '1px #4CAF50';
+                markContainer.appendChild(circleMark);
+            } else if (status === 'X') {
+                const crossMark = document.createElement('div');
+                crossMark.className = 'mark-cross';
+                crossMark.textContent = '✕';
+                crossMark.style.fontSize = '26px';
+                crossMark.style.color = '#f44336';
+                crossMark.style.fontWeight = 'bold';
+                crossMark.style.textAlign = 'center';
+                crossMark.style.lineHeight = '1';
+                crossMark.style.display = 'block';
+                crossMark.style.width = '100%';
+                crossMark.style.margin = '0';
+                crossMark.style.padding = '0';
+                crossMark.style.webkitTextStroke = '1px #f44336';
+                crossMark.style.textStroke = '1px #f44336';
+                markContainer.appendChild(crossMark);
+            }
+        }
 
         // 달력 생성 함수
-        function generateCalendar(year, month) {
+        async function generateCalendar(year, month) {
+            // 먼저 일일 상태 불러오기
+            await loadDailyStatuses(year, month);
             const monthYearElement = document.getElementById('monthYear');
             const calendarGrid = document.getElementById('calendarGrid');
             
@@ -122,57 +203,15 @@
                 markContainer.className = 'day-mark';
                 dayContent.appendChild(markContainer);
                 
-                // 클릭 이벤트: 홀수일은 초록색 O, 짝수일은 빨간색 X (토글 기능)
-                (function(dayEl, markEl, dayValue) {
-                    dayEl.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        
-                        if (dayEl.classList.contains('other-month')) {
-                            return;
-                        }
-                        
-                        const existingMark = markEl.querySelector('.mark-circle, .mark-cross');
-                        
-                        if (existingMark) {
-                            markEl.innerHTML = '';
-                        } else {
-                            if (dayValue % 2 === 1) {
-                                const circleMark = document.createElement('div');
-                                circleMark.className = 'mark-circle';
-                                circleMark.textContent = '○';
-                                circleMark.style.fontSize = '28px';
-                                circleMark.style.color = '#4CAF50';
-                                circleMark.style.fontWeight = '900';
-                                circleMark.style.textAlign = 'center';
-                                circleMark.style.lineHeight = '1';
-                                circleMark.style.display = 'block';
-                                circleMark.style.width = '100%';
-                                circleMark.style.margin = '0';
-                                circleMark.style.padding = '0';
-                                circleMark.style.webkitTextStroke = '1px #4CAF50';
-                                circleMark.style.textStroke = '1px #4CAF50';
-                                markEl.appendChild(circleMark);
-                            } else {
-                                const crossMark = document.createElement('div');
-                                crossMark.className = 'mark-cross';
-                                crossMark.textContent = '✕';
-                                crossMark.style.fontSize = '26px';
-                                crossMark.style.color = '#f44336';
-                                crossMark.style.fontWeight = 'bold';
-                                crossMark.style.textAlign = 'center';
-                                crossMark.style.lineHeight = '1';
-                                crossMark.style.display = 'block';
-                                crossMark.style.width = '100%';
-                                crossMark.style.margin = '0';
-                                crossMark.style.padding = '0';
-                                crossMark.style.webkitTextStroke = '1px #f44336';
-                                crossMark.style.textStroke = '1px #f44336';
-                                markEl.appendChild(crossMark);
-                            }
-                        }
-                    });
-                })(dayElement, markContainer, day);
+                // 날짜 문자열 생성 (YYYY-MM-DD 형식)
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                
+                // 저장된 상태가 있으면 표시
+                if (dailyStatuses[dateStr]) {
+                    addStatusMark(markContainer, dailyStatuses[dateStr]);
+                }
+                
+                // 클릭 이벤트 제거 (자동으로 표시되므로 수동 클릭 불가)
                 
                 calendarGrid.appendChild(dayElement);
             }
@@ -197,13 +236,21 @@
             }
         }
         
-        // 페이지 로드 시 달력 생성
+        // 페이지 로드 시 달력 생성 및 저녁 7시 체크
+        async function initCalendar() {
+            await checkEveningStatus();
+            await generateCalendar(currentYear, currentMonth);
+            
+            // 주기적으로 저녁 7시 체크 (1분마다)
+            setInterval(async () => {
+                await checkEveningStatus();
+            }, 60 * 1000);
+        }
+        
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                generateCalendar(currentYear, currentMonth);
-            });
+            document.addEventListener('DOMContentLoaded', initCalendar);
         } else {
-            generateCalendar(currentYear, currentMonth);
+            initCalendar();
         }
     </script>
 </body>
