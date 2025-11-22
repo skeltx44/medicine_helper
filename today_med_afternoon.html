@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=360, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>오늘의 약 - 점심</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="today_med_afternoon.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header Section -->
+        <header class="header">
+            <div class="header-top">
+                <a href="today_med.html" class="back-button">
+                    <span class="arrow">←</span>
+                    <span class="back-text">뒤로가기</span>
+                </a>
+                <div class="app-title">
+                    <span class="app-title-text"><span class="app-title-med">약</span><span class="app-title-rest">을먹자</span></span>
+                    <img src="pill.png" class="pill-icon" alt="알약">
+                </div>
+            </div>
+            <h1 class="main-title">오늘의 약</h1>
+        </header>
+
+        <!-- Main Content Section -->
+        <main class="main-content">
+            <!-- Toast Message -->
+            <div class="toast-message" id="toastMessage">
+                <span class="toast-text">저장되었습니다</span>
+            </div>
+            
+            <!-- Medication Card -->
+            <div class="medicine-card">
+                <div class="time-label">점심</div>
+                <div class="medication-description" id="medicationDescription">
+                    <p style="font-size: 18px; color: #333; text-align: center; padding: 20px;">
+                        약 정보를 불러오는 중...
+                    </p>
+                </div>
+            </div>
+
+            <!-- Instructional Text -->
+            <p class="instruction-text" id="instructionText">약을 드신 후 완료를<br>눌러주세요!</p>
+
+            <!-- Complete Button -->
+            <a href="#" class="complete-button" id="completeButton">완료</a>
+        </main>
+    </div>
+
+    <script src="config.js"></script>
+    <script>
+        (function() {
+            const API_BASE_URL = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'http://localhost:5001/api';
+            const completeButton = document.getElementById('completeButton');
+            const toastMessage = document.getElementById('toastMessage');
+            const medicationDescription = document.getElementById('medicationDescription');
+            const instructionText = document.getElementById('instructionText');
+            let currentMedications = [];
+
+            // 오늘의 약 정보 가져오기
+            async function loadTodayMedications() {
+                try {
+                    // localStorage에서 약 정보 가져오기
+                    const medications = JSON.parse(localStorage.getItem('medications') || '[]');
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    
+                    // 점심 시간대 약 필터링 + 약 일수 체크
+                    const afternoonMeds = medications.filter(med => {
+                        if (!med.times || !med.times.includes('점심')) {
+                            return false;
+                        }
+                        
+                        // 등록 날짜 확인
+                        if (!med.registered_date) {
+                            return false;
+                        }
+                        
+                        const registeredDate = new Date(med.registered_date);
+                        registeredDate.setHours(0, 0, 0, 0);
+                        const daysDiff = Math.floor((today - registeredDate) / (1000 * 60 * 60 * 24));
+                        
+                        // 약 일수가 지나지 않았는지 확인
+                        return daysDiff >= 0 && daysDiff < (med.days || 7);
+                    });
+
+                    if (afternoonMeds.length === 0) {
+                        medicationDescription.innerHTML = '<p style="font-size: 18px; color: #666; text-align: center; padding: 20px;">오늘 점심에 복용할 약이 없습니다.</p>';
+                        return;
+                    }
+
+                    currentMedications = afternoonMeds;
+
+                    // 모든 약 이름을 한 번에 변환
+                    const medicationNames = afternoonMeds.map(med => med.name);
+                    
+                    try {
+                        const response = await fetch(`${API_BASE_URL}/medications/convert`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                names: medicationNames,
+                                time: '점심'
+                            })
+                        });
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            let description = data.description;
+                            
+                            // 설명 표시 (마크다운 제거)
+                            description = description.replace(/\*\*/g, '').replace(/\*/g, '').replace(/_/g, '');
+                            
+                            // 용량 정보 제거 (250mg, 500mg 등)
+                            description = description.replace(/\s+\d+[mg|ml|정|알|MG|ML]/gi, '');
+                            
+                            // "과" 제거하고 각 약을 줄바꿈으로 분리
+                            description = description.replace(/\s+과\s+/g, '\n');
+                            
+                            // "을 물과 함께 드세요"가 중간에 있으면 마지막으로 이동
+                            if (description.includes('을 물과 함께') || description.includes('를 물과 함께')) {
+                                description = description.replace(/\s*[을를]\s+물과\s+함께\s+드세요\s*/g, '');
+                                description = description.trim();
+                                // 마지막에 "을 물과 함께 드세요" 추가
+                                if (description.length > 0) {
+                                    description += '\n을 물과 함께 드세요';
+                                }
+                            }
+                            
+                            // 여러 줄 정리 (빈 줄 제거)
+                            description = description.replace(/\n{3,}/g, '\n\n').trim();
+                            
+                            medicationDescription.innerHTML = `<p style="font-size: 20px; color: #333; text-align: center; padding: 15px; line-height: 1.8; font-weight: 500; white-space: pre-line;">${description}</p>`;
+
+                            // 음성 안내 (Web Speech API 사용)
+                            if ('speechSynthesis' in window) {
+                                const utterance = new SpeechSynthesisUtterance(cleanDescription);
+                                utterance.lang = 'ko-KR';
+                                utterance.rate = 0.9;
+                                utterance.pitch = 1.0;
+                                speechSynthesis.speak(utterance);
+                            }
+                        } else {
+                            throw new Error('약 설명 변환 실패');
+                        }
+                    } catch (error) {
+                        console.error('약 설명 변환 오류:', error);
+                        const fallbackText = afternoonMeds.map(med => `${med.name} 1알`).join('과 ') + '을 물과 함께 드세요.';
+                        medicationDescription.innerHTML = `<p style="font-size: 20px; color: #333; text-align: center; padding: 15px; line-height: 1.6; font-weight: 500;">${fallbackText}</p>`;
+                    }
+
+                } catch (error) {
+                    console.error('약 정보 로드 오류:', error);
+                    medicationDescription.innerHTML = '<p style="font-size: 18px; color: #666; text-align: center; padding: 20px;">약 정보를 불러올 수 없습니다.</p>';
+                }
+            }
+
+            // 복용 완료 처리
+            async function completeMedication() {
+                try {
+                    // 각 약에 대해 복용 완료 기록
+                    for (const med of currentMedications) {
+                        try {
+                            await fetch(`${API_BASE_URL}/medications/complete`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({
+                                    medication_id: med.id,
+                                    time: '점심'
+                                })
+                            });
+                        } catch (error) {
+                            console.error('복용 기록 저장 오류:', error);
+                        }
+                    }
+
+                    // localStorage에도 기록 저장
+                    const history = JSON.parse(localStorage.getItem('medication_history') || '[]');
+                    const today = new Date().toISOString().split('T')[0];
+                    currentMedications.forEach(med => {
+                        history.push({
+                            medication_id: med.id,
+                            medication_name: med.name,
+                            time: '점심',
+                            date: today,
+                            completed_at: new Date().toISOString()
+                        });
+                    });
+                    localStorage.setItem('medication_history', JSON.stringify(history));
+
+                    // 토스트 메시지 표시
+                    toastMessage.classList.add('show');
+                    
+                    // 0.8초 후 토스트 메시지 숨기고 main.html로 이동
+                    setTimeout(() => {
+                        toastMessage.classList.remove('show');
+                        setTimeout(() => {
+                            window.location.href = 'main.html';
+                        }, 300);
+                    }, 800);
+                } catch (error) {
+                    console.error('완료 처리 오류:', error);
+                    alert('복용 기록 저장 중 오류가 발생했습니다.');
+                }
+            }
+
+            completeButton.addEventListener('click', function(e) {
+                e.preventDefault();
+                completeMedication();
+            });
+
+            // 페이지 로드 시 약 정보 불러오기
+            loadTodayMedications();
+        })();
+    </script>
+</body>
+</html>
+
+
+

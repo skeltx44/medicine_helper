@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=360, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>회원가입</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="signup.css">
+    <script src="config.js"></script>
+</head>
+<body>
+    <div class="screen">
+        <header class="hero">
+            <a class="back-link" href="index.html">
+                <span class="arrow">←</span>
+                <span>뒤로가기</span>
+            </a>
+        </header>
+
+        <main class="card">
+            <h1 class="title">새 계정 만들기</h1>
+            <p class="subtitle">이미 있나요? 로그인 하십시오.</p>
+
+            <div class="field">
+                <label for="signupName" class="field-label">성명</label>
+                <input id="signupName" class="text-field" type="text" placeholder="김복자" autocomplete="name" autocapitalize="none">
+            </div>
+
+            <div class="field">
+                <label for="signupPhone" class="field-label">전화번호</label>
+                <input
+                    id="signupPhone"
+                    class="text-field"
+                    type="tel"
+                    placeholder="010-1234-5678"
+                    inputmode="tel"
+                    autocomplete="tel"
+                    maxlength="13">
+            </div>
+
+            <div class="field">
+                <label for="signupPassword" class="field-label">보호자 전화번호</label>
+                <input
+                    id="signupPassword"
+                    class="text-field"
+                    type="tel"
+                    placeholder="010-1234-5678"
+                    autocomplete="tel"
+                    inputmode="tel"
+                    maxlength="13">
+            </div>
+
+            <button type="button" class="btn primary" id="signupButton">회원가입</button>
+        </main>
+    </div>
+
+    <script>
+        (function () {
+            const textFields = document.querySelectorAll('.text-field');
+            const guardianPhoneInput = document.getElementById('signupPassword');
+            const phoneInput = document.getElementById('signupPhone');
+
+            const blurOnOutsideTap = (event) => {
+                if (!event.target.closest('.text-field')) {
+                    const active = document.activeElement;
+                    if (active && active.classList.contains('text-field')) {
+                        active.blur();
+                    }
+                }
+            };
+
+            document.addEventListener('pointerdown', blurOnOutsideTap);
+
+            textFields.forEach((input) => {
+                input.addEventListener('focus', () => input.classList.add('focused'));
+                input.addEventListener('blur', () => input.classList.remove('focused'));
+            });
+
+            phoneInput.addEventListener('input', () => {
+                const digitsOnly = phoneInput.value.replace(/\D/g, '').slice(0, 11);
+                phoneInput.value = digitsOnly;
+            });
+
+            guardianPhoneInput.addEventListener('input', () => {
+                const digitsOnly = guardianPhoneInput.value.replace(/\D/g, '').slice(0, 11);
+                guardianPhoneInput.value = digitsOnly;
+            });
+
+            // 회원가입 버튼 클릭 이벤트
+            const signupButton = document.getElementById('signupButton');
+            signupButton.addEventListener('click', () => {
+                const nameInput = document.getElementById('signupName');
+                const phone = phoneInput.value.trim();
+                const guardianPhone = guardianPhoneInput.value.trim();
+
+                // 간단한 유효성 검사
+                if (!nameInput.value.trim() || !phone || !guardianPhone) {
+                    alert('모든 항목을 입력해주세요.');
+                    return;
+                }
+
+                if (phone.length < 10 || guardianPhone.length < 10) {
+                    alert('올바른 전화번호를 입력해주세요.');
+                    return;
+                }
+
+                // 서버에 사용자 정보 저장
+                const API_BASE_URL = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'http://localhost:5001/api';
+                fetch(`${API_BASE_URL}/users`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: nameInput.value.trim(),
+                        phone: phone,
+                        guardian_phone: guardianPhone,
+                        type: 'signup'
+                    })
+                }).catch(error => {
+                    console.error('사용자 정보 저장 오류:', error);
+                });
+                
+                // 회원가입 성공 플래그 설정
+                sessionStorage.setItem('signupSuccess', 'true');
+                
+                // index.html로 이동
+                window.location.href = 'index.html';
+            });
+        })();
+    </script>
+</body>
+</html>
+

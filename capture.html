@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=360, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>검색</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="capture.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header Section -->
+        <header class="header">
+            <div class="header-top">
+                <a href="main.html" class="back-button">
+                    <span class="arrow">←</span>
+                    <span class="back-text">뒤로가기</span>
+                </a>
+                <div class="app-title">
+                    <span class="app-title-text"><span class="app-title-med">약</span><span class="app-title-rest">을먹자</span></span>
+                    <img src="pill.png" class="pill-icon" alt="알약">
+                </div>
+            </div>
+            <h1 class="main-title">검색</h1>
+        </header>
+
+        <!-- Main Content Section -->
+        <main class="main-content">
+            <p class="instruction-text">약 봉투를 네모 안에 맞춰주세요.</p>
+            
+            <!-- Camera Area -->
+            <div class="camera-container" id="cameraContainer">
+                <video id="videoElement" autoplay playsinline style="width: 100%; height: 100%; object-fit: cover; display: none;"></video>
+                <canvas id="canvasElement" style="display: none;"></canvas>
+                <div class="camera-placeholder" id="cameraPlaceholder">
+                    <p>카메라 영역</p>
+                </div>
+                <!-- 촬영 틀 (Overlay) -->
+                <div class="capture-frame" id="captureFrame"></div>
+            </div>
+        </main>
+
+        <!-- Capture Button -->
+        <button class="capture-button" id="captureButton">
+            <img src="captureicon.png" alt="촬영" class="capture-icon">
+        </button>
+    </div>
+
+    <script>
+        let stream = null;
+        let capturedImageUri = null;
+        const videoElement = document.getElementById('videoElement');
+        const canvasElement = document.getElementById('canvasElement');
+        const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+        const cameraContainer = document.getElementById('cameraContainer');
+        const captureButton = document.getElementById('captureButton');
+
+        // 카메라 시작
+        async function startCamera() {
+            try {
+                // 카메라 권한 요청
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'environment', // 후면 카메라 우선
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+
+                // 비디오 요소에 스트림 연결
+                videoElement.srcObject = stream;
+                videoElement.style.display = 'block';
+                cameraPlaceholder.style.display = 'none';
+                
+                // 촬영 틀 항상 표시
+                const captureFrame = document.getElementById('captureFrame');
+                if (captureFrame) {
+                    captureFrame.style.display = 'block';
+                    captureFrame.style.visibility = 'visible';
+                }
+                
+                // Canvas 크기 설정
+                videoElement.addEventListener('loadedmetadata', () => {
+                    canvasElement.width = videoElement.videoWidth;
+                    canvasElement.height = videoElement.videoHeight;
+                });
+            } catch (error) {
+                console.error('카메라 접근 오류:', error);
+                cameraPlaceholder.innerHTML = '<p style="color: red;">카메라 권한이 필요합니다.<br>브라우저 설정에서 카메라 권한을 허용해주세요.</p>';
+                
+                if (error.name === 'NotAllowedError') {
+                    alert('카메라 권한이 거부되었습니다. 브라우저 설정에서 카메라 권한을 허용해주세요.');
+                } else if (error.name === 'NotFoundError') {
+                    alert('카메라를 찾을 수 없습니다.');
+                } else {
+                    alert('카메라 접근 중 오류가 발생했습니다: ' + error.message);
+                }
+            }
+        }
+
+        // 사진 촬영 - 틀 내부만 잘라서 촬영
+        function capturePhoto() {
+            if (!stream || !videoElement.videoWidth) {
+                alert('카메라가 준비되지 않았습니다.');
+                return;
+            }
+
+            try {
+                // 촬영 틀 요소 가져오기
+                const captureFrame = document.getElementById('captureFrame');
+                if (!captureFrame) {
+                    alert('촬영 틀을 찾을 수 없습니다.');
+                    return;
+                }
+                
+                // 틀과 비디오의 화면상 위치와 크기
+                const frameRect = captureFrame.getBoundingClientRect();
+                const videoRect = videoElement.getBoundingClientRect();
+                
+                // 비디오의 실제 크기 (카메라 해상도)
+                const videoActualWidth = videoElement.videoWidth;
+                const videoActualHeight = videoElement.videoHeight;
+                
+                // 비디오의 화면 표시 크기
+                const videoDisplayWidth = videoRect.width;
+                const videoDisplayHeight = videoRect.height;
+                
+                // 틀의 화면상 크기와 위치 (비디오 영역 기준)
+                const frameX = frameRect.left - videoRect.left;
+                const frameY = frameRect.top - videoRect.top;
+                const frameWidth = frameRect.width;
+                const frameHeight = frameRect.height;
+                
+                // object-fit: cover일 때의 비율 계산
+                // cover는 비디오를 컨테이너에 맞추되 비율을 유지하면서 넘치는 부분을 잘라냄
+                const videoAspect = videoActualWidth / videoActualHeight;
+                const displayAspect = videoDisplayWidth / videoDisplayHeight;
+                
+                // 실제 비디오가 화면에 어떻게 표시되는지 계산
+                let videoScaledWidth, videoScaledHeight, videoOffsetX = 0, videoOffsetY = 0;
+                
+                if (videoAspect > displayAspect) {
+                    // 비디오가 더 넓음 - 높이에 맞춤, 좌우가 잘림
+                    videoScaledHeight = videoDisplayHeight;
+                    videoScaledWidth = videoScaledHeight * videoAspect;
+                    videoOffsetX = (videoScaledWidth - videoDisplayWidth) / 2;
+                } else {
+                    // 비디오가 더 높음 - 너비에 맞춤, 상하가 잘림
+                    videoScaledWidth = videoDisplayWidth;
+                    videoScaledHeight = videoScaledWidth / videoAspect;
+                    videoOffsetY = (videoScaledHeight - videoDisplayHeight) / 2;
+                }
+                
+                // 화면 좌표를 실제 비디오 좌표로 변환하는 스케일
+                const scaleX = videoActualWidth / videoScaledWidth;
+                const scaleY = videoActualHeight / videoScaledHeight;
+                
+                // 틀이 비디오 영역 내에서의 상대 위치를 실제 비디오 좌표로 변환
+                // 틀의 왼쪽 상단 좌표 (비디오의 실제 좌표계 기준)
+                const sourceX = Math.max(0, Math.floor((frameX + videoOffsetX) * scaleX));
+                const sourceY = Math.max(0, Math.floor((frameY + videoOffsetY) * scaleY));
+                
+                // 틀의 크기를 실제 비디오 좌표로 변환
+                const sourceWidth = Math.min(
+                    Math.floor(frameWidth * scaleX),
+                    videoActualWidth - sourceX
+                );
+                const sourceHeight = Math.min(
+                    Math.floor(frameHeight * scaleY),
+                    videoActualHeight - sourceY
+                );
+                
+                // Canvas 크기를 틀 크기로 설정
+                canvasElement.width = sourceWidth;
+                canvasElement.height = sourceHeight;
+                
+                // Canvas 컨텍스트 가져오기
+                const context = canvasElement.getContext('2d');
+                
+                // 틀 영역만 canvas에 그리기 (비디오에서 잘라내기)
+                context.drawImage(
+                    videoElement,
+                    sourceX, sourceY, sourceWidth, sourceHeight,  // 소스: 비디오에서 잘라낼 영역
+                    0, 0, sourceWidth, sourceHeight              // 대상: canvas에 그릴 영역
+                );
+                
+                // Canvas를 이미지로 변환
+                capturedImageUri = canvasElement.toDataURL('image/jpeg', 0.8);
+                
+                // 디버깅 정보 (콘솔에 출력)
+                console.log('촬영 정보:');
+                console.log('- 비디오 실제 크기:', videoActualWidth, 'x', videoActualHeight);
+                console.log('- 비디오 표시 크기:', videoDisplayWidth, 'x', videoDisplayHeight);
+                console.log('- 틀 화면 위치:', frameX, frameY);
+                console.log('- 틀 화면 크기:', frameWidth, 'x', frameHeight);
+                console.log('- 틀 실제 좌표:', sourceX, sourceY);
+                console.log('- 틀 실제 크기:', sourceWidth, 'x', sourceHeight);
+                console.log('- Canvas 크기:', canvasElement.width, 'x', canvasElement.height);
+                
+                // 촬영된 이미지 URI를 콘솔에 출력 (추후 업로드/처리용)
+                console.log('Captured Image URI:', capturedImageUri);
+                
+                // 비디오 숨기고 이미지 표시
+                videoElement.style.display = 'none';
+                const captureFrame2 = document.getElementById('captureFrame');
+                if (captureFrame2) {
+                    captureFrame2.style.display = 'none';
+                }
+                cameraPlaceholder.style.display = 'flex';
+                cameraPlaceholder.innerHTML = `
+                    <div style="text-align: center;">
+                        <p style="margin-bottom: 10px; font-weight: bold;">촬영 완료!</p>
+                        <img src="${capturedImageUri}" style="max-width: 100%; max-height: 300px; border-radius: 8px;" alt="촬영된 이미지">
+                    </div>
+                `;
+                
+                // 스트림 정지
+                stopCamera();
+                
+                alert('사진이 촬영되었습니다.');
+            } catch (error) {
+                console.error('사진 촬영 오류:', error);
+                alert('사진 촬영 중 오류가 발생했습니다.');
+            }
+        }
+
+        // 카메라 정지
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+        }
+
+        // 백엔드 API URL 설정 (config.js에서 가져오거나 기본값 사용)
+        const API_BASE_URL = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'http://localhost:5001/api';
+        
+        // 이미지를 서버로 전송하여 OCR 처리
+        async function uploadAndProcessImage(imageBase64) {
+            try {
+                // 로딩 표시
+                cameraPlaceholder.innerHTML = '<p style="color: #5271ff;">이미지 분석 중...</p>';
+                
+                const response = await fetch(`${API_BASE_URL}/ocr`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        image: imageBase64
+                    })
+                });
+                
+                if (!response.ok) {
+                    // 더 자세한 에러 정보 가져오기
+                    let errorMessage = '서버 응답 오류';
+                    try {
+                        const errorData = await response.json();
+                        errorMessage = errorData.error || errorData.message || `서버 오류 (${response.status})`;
+                    } catch (e) {
+                        errorMessage = `서버 오류 (${response.status} ${response.statusText})`;
+                    }
+                    throw new Error(errorMessage);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // 약 정보 저장 (localStorage에 저장)
+                    const medications = JSON.parse(localStorage.getItem('medications') || '[]');
+                    
+                    // 등록 날짜 기준으로 약 정보 저장
+                    const medicationData = {
+                        ...data.medication,
+                        registered_date: new Date().toISOString().split('T')[0], // YYYY-MM-DD 형식
+                        registered_timestamp: new Date().toISOString()
+                    };
+                    
+                    medications.push(medicationData);
+                    localStorage.setItem('medications', JSON.stringify(medications));
+                    
+                    // 백엔드에도 저장 (동기화)
+                    try {
+                        await fetch(`${API_BASE_URL}/medications`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(medicationData)
+                        });
+                    } catch (error) {
+                        console.error('백엔드 저장 오류:', error);
+                        // 백엔드 저장 실패해도 localStorage에 저장된 정보는 유지
+                    }
+                    
+                    const mealInfo = medicationData.before_meal ? '식전' : '식후';
+                    alert(`약 정보가 등록되었습니다!\n약 이름: ${medicationData.name}\n복용 횟수: 1일 ${medicationData.dosage}회\n복용 기간: ${medicationData.days}일\n복용 시기: ${mealInfo}`);
+                    
+                    // 메인 화면으로 이동
+                    setTimeout(() => {
+                        window.location.href = 'main.html';
+                    }, 1000);
+                } else {
+                    throw new Error(data.error || '약 정보를 추출할 수 없습니다. 다시 시도해주세요.');
+                }
+            } catch (error) {
+                console.error('OCR 처리 오류:', error);
+                alert('이미지 분석 중 오류가 발생했습니다: ' + error.message);
+                cameraPlaceholder.innerHTML = '<p>카메라 영역</p>';
+            }
+        }
+
+        // 촬영 버튼 클릭 이벤트
+        captureButton.addEventListener('click', () => {
+            if (capturedImageUri) {
+                // 다시 촬영
+                capturedImageUri = null;
+                cameraPlaceholder.innerHTML = '<p>카메라 영역</p>';
+                const captureFrame = document.getElementById('captureFrame');
+                if (captureFrame) {
+                    captureFrame.style.display = 'block';
+                    captureFrame.style.visibility = 'visible';
+                }
+                startCamera();
+            } else {
+                capturePhoto();
+                // 촬영 후 이미지 업로드 및 처리
+                setTimeout(() => {
+                    if (capturedImageUri) {
+                        uploadAndProcessImage(capturedImageUri);
+                    }
+                }, 500);
+            }
+        });
+
+        // 페이지 로드 시 카메라 시작
+        window.addEventListener('load', () => {
+            startCamera();
+        });
+
+        // 페이지 언로드 시 카메라 정지
+        window.addEventListener('beforeunload', () => {
+            stopCamera();
+        });
+    </script>
+</body>
+</html>
+

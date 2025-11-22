@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=360, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>약을먹자</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="main.css">
+</head>
+<body>
+    <div class="intro-overlay" id="introOverlay">
+        <img src="intro.png" alt="인트로" class="intro-image">
+    </div>
+    <div class="container">
+        <!-- Header Section -->
+        <header class="header">
+            <div class="app-title">
+                <span class="app-title-text">
+                    <span class="app-title-med">약</span><span class="app-title-rest">을먹자</span>
+                </span>
+                <img src="pill.png" class="pill-icon" alt="알약">
+            </div>
+        </header>
+
+        <!-- Main Content Section -->
+        <main class="main-content">
+            <div class="button-grid">
+                <a href="capture.html" class="menu-button">
+                    <img src="capture.png" alt="검색" class="button-icon">
+                    <span class="button-text">검색</span>
+                </a>
+                <a href="medlist.html" class="menu-button">
+                    <img src="medlist.png" alt="복약 내역" class="button-icon button-icon-large">
+                    <span class="button-text">복약 내역</span>
+                </a>
+                <a href="today_med.html" class="menu-button">
+                    <img src="today_med.png" alt="오늘의 약" class="button-icon button-icon-large">
+                    <span class="button-text">오늘의 약</span>
+                </a>
+                <a href="thismonth.html" class="menu-button">
+                    <img src="thismonth.png" alt="이달의 약" class="button-icon button-icon-large">
+                    <span class="button-text">이달의 약</span>
+                </a>
+            </div>
+        </main>
+
+        <!-- Floating Action Button -->
+        <div class="fab-container">
+            <a href="chatbot.html" class="fab-button">
+                <img src="chatbot.png" alt="챗봇" class="fab-icon-image">
+                <span class="fab-text">챗봇</span>
+            </a>
+        </div>
+    </div>
+    <script src="notification.js"></script>
+    <script>
+        (function() {
+            // 뒤로가기 감지 (페이지 로드 전에 체크)
+            let isBackNavigation = false;
+            
+            // performance.navigation.type으로 뒤로가기 감지 (즉시 체크)
+            if (performance.navigation && performance.navigation.type === 2) {
+                isBackNavigation = true;
+            }
+            
+            // Navigation Timing API v2로 뒤로가기 감지
+            if (performance.getEntriesByType) {
+                const navEntries = performance.getEntriesByType('navigation');
+                if (navEntries.length > 0 && navEntries[0].type === 'back_forward') {
+                    isBackNavigation = true;
+                }
+            }
+            
+            // referrer 체크 - 같은 도메인에서 온 경우 뒤로가기로 간주
+            if (document.referrer && document.referrer !== '' && document.referrer.includes(window.location.hostname)) {
+                isBackNavigation = true;
+            }
+            
+            // pageshow 이벤트로 bfcache에서 복원된 경우 감지
+            window.addEventListener('pageshow', function(event) {
+                if (event.persisted) {
+                    isBackNavigation = true;
+                }
+            }, { once: true });
+            
+            // popstate 이벤트로 뒤로가기 감지
+            window.addEventListener('popstate', function() {
+                isBackNavigation = true;
+            });
+            
+            // DOM이 준비되면 체크
+            function checkIntro() {
+                const introOverlay = document.getElementById('introOverlay');
+                const fromLogin = sessionStorage.getItem('fromLogin') === 'true';
+                const sessionMainIntroShown = sessionStorage.getItem('sessionMainIntroShown') === 'true';
+                const mainVisited = sessionStorage.getItem('mainVisited') === 'true';
+                
+                // 로그인 후 처음 진입한 경우 플래그 제거
+                if (fromLogin) {
+                    sessionStorage.removeItem('fromLogin');
+                    sessionStorage.setItem('mainVisited', 'true');
+                }
+                
+                // 뒤로가기이거나 로그인 후 처음 진입한 경우 - 표시하지 않음
+                if (isBackNavigation || fromLogin) {
+                    introOverlay.style.display = 'none';
+                    sessionStorage.setItem('mainVisited', 'true');
+                } 
+                // 이번 세션에서 이미 본 경우 또는 이미 방문한 경우 - 표시하지 않음
+                else if (sessionMainIntroShown || mainVisited) {
+                    introOverlay.style.display = 'none';
+                }
+                // 앱 재실행 시 (새 세션) - 표시
+                else {
+                    introOverlay.style.display = 'flex';
+                    // 2초 후 사라지게
+                    setTimeout(function() {
+                        introOverlay.style.opacity = '0';
+                        introOverlay.style.transition = 'opacity 0.5s ease-out';
+                        setTimeout(function() {
+                            introOverlay.style.display = 'none';
+                            sessionStorage.setItem('sessionMainIntroShown', 'true');
+                            sessionStorage.setItem('mainVisited', 'true');
+                        }, 500);
+                    }, 2000);
+                }
+            }
+            
+            // 즉시 실행 (DOM 로드 전에도 체크 가능)
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', checkIntro);
+            } else {
+                checkIntro();
+            }
+        })();
+        
+    </script>
+</body>
+</html>
+

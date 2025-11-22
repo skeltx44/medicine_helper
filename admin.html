@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>관리자 - 사용자 목록</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #5271ff;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 20px;
+        }
+        
+        .info-box {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        
+        .info-box p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        
+        .button-group {
+            margin-bottom: 20px;
+        }
+        
+        button {
+            background-color: #5271ff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        
+        button:hover {
+            background-color: #4056d4;
+        }
+        
+        .user-item {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            border-left: 4px solid #5271ff;
+        }
+        
+        .user-item.signup {
+            border-left-color: #28a745;
+        }
+        
+        .user-item h3 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .user-item p {
+            color: #666;
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        
+        .user-type {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        
+        .user-type.login {
+            background-color: #5271ff;
+            color: white;
+        }
+        
+        .user-type.signup {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .empty {
+            text-align: center;
+            color: #999;
+            padding: 40px;
+        }
+        
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+        
+        .stat-card .number {
+            font-size: 32px;
+            font-weight: bold;
+            color: #5271ff;
+        }
+        
+        .stat-card .label {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>👥 사용자 목록</h1>
+        <p class="subtitle">로그인 및 회원가입한 사용자 정보를 확인할 수 있습니다.</p>
+        
+        <div class="info-box">
+            <p><strong>백엔드 서버:</strong> <code>http://localhost:5001</code></p>
+            <p><strong>API 엔드포인트:</strong> <code>GET /api/users</code></p>
+        </div>
+        
+        <div class="stats" id="statsContainer">
+            <div class="stat-card">
+                <div class="number" id="totalUsers">-</div>
+                <div class="label">전체 사용자</div>
+            </div>
+            <div class="stat-card">
+                <div class="number" id="signupUsers">-</div>
+                <div class="label">회원가입 사용자</div>
+            </div>
+        </div>
+        
+        <div class="button-group">
+            <button onclick="loadUsers()">사용자 목록 새로고침</button>
+        </div>
+        
+        <div id="errorMessage"></div>
+        <div id="userList">
+            <div class="empty">새로고침 버튼을 클릭하여 사용자 목록을 불러오세요.</div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script>
+        const API_BASE_URL = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'http://localhost:5001/api';
+
+        async function loadUsers() {
+            const userListDiv = document.getElementById('userList');
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.innerHTML = '';
+            
+            try {
+                userListDiv.innerHTML = '<div class="empty">로딩 중...</div>';
+                
+                const response = await fetch(`${API_BASE_URL}/users`);
+                if (!response.ok) {
+                    throw new Error(`서버 오류: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.count === 0) {
+                    userListDiv.innerHTML = '<div class="empty">등록된 사용자가 없습니다.<br>로그인 또는 회원가입을 시도해보세요.</div>';
+                    document.getElementById('totalUsers').textContent = '0';
+                    document.getElementById('signupUsers').textContent = '0';
+                    return;
+                }
+                
+                // 통계 업데이트
+                document.getElementById('totalUsers').textContent = data.count;
+                const signupCount = data.users.filter(u => u.type === 'signup').length;
+                document.getElementById('signupUsers').textContent = signupCount;
+                
+                // 사용자 목록 표시
+                let html = '';
+                
+                data.users.forEach(user => {
+                    const createdTime = new Date(user.created_at).toLocaleString('ko-KR');
+                    const typeClass = user.type === 'signup' ? 'signup' : '';
+                    const typeLabel = user.type === 'signup' ? '회원가입' : '로그인';
+                    const typeBadgeClass = user.type === 'signup' ? 'signup' : 'login';
+                    
+                    html += `
+                        <div class="user-item ${typeClass}">
+                            <h3>
+                                ${user.name || '이름 없음'}
+                                <span class="user-type ${typeBadgeClass}">${typeLabel}</span>
+                            </h3>
+                            <p><strong>ID:</strong> ${user.id}</p>
+                            <p><strong>전화번호:</strong> ${user.phone || '없음'}</p>
+                            ${user.guardian_phone ? `<p><strong>보호자 전화번호:</strong> ${user.guardian_phone}</p>` : ''}
+                            <p><strong>등록 시간:</strong> ${createdTime}</p>
+                        </div>
+                    `;
+                });
+                
+                userListDiv.innerHTML = html;
+            } catch (error) {
+                console.error('오류:', error);
+                errorDiv.innerHTML = `<div class="error">오류: ${error.message}<br>백엔드 서버가 실행 중인지 확인해주세요.</div>`;
+                userListDiv.innerHTML = '<div class="empty">데이터를 불러올 수 없습니다.</div>';
+            }
+        }
+
+        // 페이지 로드 시 자동으로 사용자 목록 불러오기
+        window.addEventListener('DOMContentLoaded', () => {
+            loadUsers();
+        });
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=360, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>오늘의 약</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="today_med.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header Section -->
+        <header class="header">
+            <div class="header-top">
+                <a href="main.html" class="back-button">
+                    <span class="arrow">←</span>
+                    <span class="back-text">뒤로가기</span>
+                </a>
+                <div class="app-title">
+                    <span class="app-title-text"><span class="app-title-med">약</span><span class="app-title-rest">을먹자</span></span>
+                    <img src="pill.png" class="pill-icon" alt="알약">
+                </div>
+            </div>
+            <h1 class="main-title">오늘의 약</h1>
+        </header>
+
+        <!-- Main Content Section -->
+        <main class="main-content">
+            <!-- Morning Button -->
+            <div class="medicine-button">
+                <span class="time-label">아침</span>
+                <a href="today_med_morning.html" class="detail-button">상세보기</a>
+            </div>
+
+            <!-- Lunch Button -->
+            <div class="medicine-button">
+                <span class="time-label">점심</span>
+                <a href="today_med_afternoon.html" class="detail-button">상세보기</a>
+            </div>
+
+            <!-- Evening Button -->
+            <div class="medicine-button">
+                <span class="time-label">저녁</span>
+                <a href="today_med_evening.html" class="detail-button">상세보기</a>
+            </div>
+
+            <!-- Instructional Text -->
+            <p class="instruction-text">상세보기를 눌러 오늘 먹을<br>약을 확인해주세요!</p>
+        </main>
+    </div>
+</body>
+</html>
+

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=360, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>로그인</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="login.css">
+    <script src="config.js"></script>
+</head>
+<body>
+    <div class="intro-overlay" id="introOverlay">
+        <img src="intro.png" alt="인트로" class="intro-image">
+    </div>
+    <div class="screen">
+        <div class="hero">
+            <img src="logo.png" alt="로고" class="cactus">
+        </div>
+
+        <main class="card">
+            <!-- Toast Message -->
+            <div class="toast-message" id="toastMessage">
+                <span class="toast-text">회원가입 성공!</span>
+            </div>
+            
+            <h1 class="title">로그인</h1>
+
+            <div class="field">
+                <label class="field-label" for="nameInput">성명</label>
+                <input id="nameInput" class="text-field" type="text" placeholder="김복자" autocomplete="name" autocapitalize="none">
+            </div>
+
+            <div class="field">
+                <label class="field-label" for="passwordInput">전화번호</label>
+                <input
+                    id="passwordInput"
+                    class="text-field"
+                    type="tel"
+                    placeholder="010-1234-5678"
+                    autocomplete="tel"
+                    inputmode="tel"
+                    maxlength="13">
+            </div>
+
+            <div class="button-group">
+                <button type="button" class="btn primary" id="loginButton">로그인</button>
+                <a href="signup.html" class="btn secondary link-button">회원가입</a>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        (function () {
+            // 회원가입 성공 메시지 표시
+            const signupSuccess = sessionStorage.getItem('signupSuccess') === 'true';
+            if (signupSuccess) {
+                sessionStorage.removeItem('signupSuccess');
+                // 페이지 로드 후 토스트 메시지 표시
+                setTimeout(() => {
+                    const toastMessage = document.getElementById('toastMessage');
+                    toastMessage.classList.add('show');
+                    
+                    // 1.5초 후 자동으로 사라지게
+                    setTimeout(() => {
+                        toastMessage.classList.remove('show');
+                    }, 1500);
+                }, 300);
+            }
+
+            // 토큰이 있으면 자동으로 main.html로 리다이렉트
+            const token = localStorage.getItem('authToken');
+            if (token) {
+                window.location.href = 'main.html';
+                return;
+            }
+
+            const textFields = document.querySelectorAll('.text-field');
+            const phoneInput = document.getElementById('passwordInput');
+            const loginButton = document.getElementById('loginButton');
+
+            const blurOnOutsideTap = (event) => {
+                if (!event.target.closest('.text-field')) {
+                    const active = document.activeElement;
+                    if (active && active.classList.contains('text-field')) {
+                        active.blur();
+                    }
+                }
+            };
+
+            document.addEventListener('pointerdown', blurOnOutsideTap);
+
+            textFields.forEach((input) => {
+                input.addEventListener('focus', () => input.classList.add('focused'));
+                input.addEventListener('blur', () => input.classList.remove('focused'));
+            });
+
+            phoneInput.addEventListener('input', () => {
+                const digitsOnly = phoneInput.value.replace(/\D/g, '').slice(0, 11);
+                phoneInput.value = digitsOnly;
+            });
+
+            // 로그인 버튼 클릭 이벤트
+            loginButton.addEventListener('click', () => {
+                const nameInput = document.getElementById('nameInput');
+                const name = nameInput.value.trim();
+                const phone = phoneInput.value.trim();
+
+                // 간단한 유효성 검사
+                if (!name || !phone) {
+                    alert('성명과 전화번호를 입력해주세요.');
+                    return;
+                }
+
+                if (phone.length < 10) {
+                    alert('올바른 전화번호를 입력해주세요.');
+                    return;
+                }
+
+                // 토큰 생성 (실제로는 서버에서 받아야 하지만, 여기서는 간단하게 생성)
+                const token = 'token_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                
+                // localStorage에 토큰 저장
+                localStorage.setItem('authToken', token);
+                
+                // 서버에 사용자 정보 저장
+                const API_BASE_URL = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'http://localhost:5001/api';
+                fetch(`${API_BASE_URL}/users`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        phone: phone,
+                        type: 'login'
+                    })
+                }).catch(error => {
+                    console.error('사용자 정보 저장 오류:', error);
+                });
+                
+                // 로그인 후 처음 진입임을 표시하는 플래그 설정
+                sessionStorage.setItem('fromLogin', 'true');
+                
+                // main.html로 이동
+                window.location.href = 'main.html';
+            });
+        })();
+    </script>
+    <script>
+        (function() {
+            // 뒤로가기 감지 (페이지 로드 전에 체크)
+            let isBackNavigation = false;
+            
+            // performance.navigation.type으로 뒤로가기 감지 (즉시 체크)
+            if (performance.navigation && performance.navigation.type === 2) {
+                isBackNavigation = true;
+            }
+            
+            // Navigation Timing API v2로 뒤로가기 감지
+            if (performance.getEntriesByType) {
+                const navEntries = performance.getEntriesByType('navigation');
+                if (navEntries.length > 0 && navEntries[0].type === 'back_forward') {
+                    isBackNavigation = true;
+                }
+            }
+            
+            // pageshow 이벤트로 bfcache에서 복원된 경우 감지
+            window.addEventListener('pageshow', function(event) {
+                if (event.persisted) {
+                    isBackNavigation = true;
+                }
+            }, { once: true });
+            
+            // DOM이 준비되면 체크
+            function checkIntro() {
+                const introOverlay = document.getElementById('introOverlay');
+                const sessionLoginIntroShown = sessionStorage.getItem('sessionLoginIntroShown') === 'true';
+                
+                // 뒤로가기이거나 이번 세션에서 이미 본 경우 - 표시하지 않음
+                if (isBackNavigation || sessionLoginIntroShown) {
+                    introOverlay.style.display = 'none';
+                } else {
+                    // 앱 처음 실행 시 (새 세션) - 표시
+                    introOverlay.style.display = 'flex';
+                    // 2초 후 사라지게
+                    setTimeout(function() {
+                        introOverlay.style.opacity = '0';
+                        introOverlay.style.transition = 'opacity 0.5s ease-out';
+                        setTimeout(function() {
+                            introOverlay.style.display = 'none';
+                            sessionStorage.setItem('sessionLoginIntroShown', 'true');
+                        }, 500);
+                    }, 2000);
+                }
+            }
+            
+            // 즉시 실행 (DOM 로드 전에도 체크 가능)
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', checkIntro);
+            } else {
+                checkIntro();
+            }
+        })();
+    </script>
+</body>
+</html>
+
