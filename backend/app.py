@@ -75,7 +75,14 @@ def chat():
             messages=[
                 {
                     "role": "system",
-                    "content": "당신은 고령층을 위한 약 복용 도우미 챗봇입니다. 친절하고 간단한 언어로 답변해주세요. 약 복용, 복약 내역, 약 검색 등에 대해 도움을 드립니다. 마크다운 문법(** 등)을 사용하지 말고 순수 텍스트만 반환하세요."
+                    "content": (
+                        "당신은 고령층을 위한 약 복용 도우미 챗봇입니다. "
+                        "친절하고 간단한 언어로 짧게 답변해주세요. "
+                        "약 복용, 복약 내역, 약 검색 등에 대해 도움을 드립니다. "
+                        "증상 진단이나 병명 추정은 절대 하지 말고, "
+                        "필요 시에는 의사·약사 상담을 권유하세요. "
+                        "마크다운 문법(**, *, _, - 등)을 사용하지 말고 순수 텍스트만 반환하세요."
+                    )
                 },
                 {
                     "role": "user",
@@ -127,25 +134,44 @@ def ocr():
             messages=[
                 {
                     "role": "system",
-                    "content": """당신은 약봉지 이미지를 분석하는 전문가입니다. 
-                    이미지에서 다음 정보를 JSON 형식으로 추출해주세요:
-                    {
-                        "name": "약 이름",
-                        "dosage": "1일 복용 횟수 (숫자만)",
-                        "days": "총 복용 일수 (숫자만)",
-                        "before_meal": true/false (식전이면 true, 식후면 false),
-                        "times": ["아침", "점심", "저녁"] (복용 시간대)
-                    }
-                    식전/식후 판단: "식전", "식사 전", "before meal" 등이 보이면 before_meal: true
-                    식후는 "식후", "식사 후", "after meal" 등이 보이면 before_meal: false
-                    """
+                    "content": (
+                        "당신은 한국 약봉투 이미지를 분석하는 전문가입니다.\n"
+                        "이미지에서 다음 정보를 JSON 형식으로 정확하게 추출해주세요.\n"
+                        "반드시 아래 스키마와 키 이름을 그대로 사용하고, "
+                        "JSON 외의 다른 설명 텍스트는 절대 출력하지 마세요.\n\n"
+                        "{\n"
+                        "  \"name\": \"약 이름 문자열\",\n"
+                        "  \"dosage\": 1일 복용 횟수(정수, 예: 3),\n"
+                        "  \"days\": 총 복용 일수(정수, 예: 7),\n"
+                        "  \"before_meal\": true 또는 false,\n"
+                        "  \"times\": [\"아침\", \"점심\", \"저녁\"] 중 일부를 요소로 갖는 배열\n"
+                        "}\n\n"
+                        "위 스키마의 name, dosage, days, before_meal, times 키는 "
+                        "반드시 최상위에 한 번씩 포함해야 합니다.\n\n"
+                        "추가 규칙:\n"
+                        "- 약봉투에 서로 다른 약이 여러 개 적혀 있다면, 각 약을 medications 배열의 별도 원소로 넣으세요.\n"
+                        "- 정보가 애매하거나 잘 안 보이면 절대 추측하지 말고 해당 필드는 null로 두세요.\n"
+                        "  - 예시: 복용 횟수가 잘 보이지 않으면 dosage는 null로 두세요.\n"
+                        "  - 예시: 복용 일수가 안 보이면 days는 null로 두세요.\n"
+                        "- \"dosage\"와 \"days\"는 반드시 정수로 추출하세요. \"3회\", \"3일분\"처럼 적혀 있어도 숫자 3만 남기세요.\n"
+                        "- 약 이름이 명확히 안 보이면 name은 null로 두세요.\n"
+                        "- 아무 약도 확실하게 읽을 수 없다면 medications는 빈 배열 []로 두세요.\n\n"
+                        "주의:\n"
+                        "- 정보를 추측해서 채우지 마세요. 불확실하면 해당 필드는 null로 두세요.\n"
+                        "- 위 스키마의 최상위 필드(name, dosage, days, before_meal, times)는 "
+                        "medications 배열과 별개로 반드시 포함해야 합니다.\n"
+                        "- before_meal 값은 특별한 경우가 아니라면 false로 설정해도 됩니다.\n"
+                        "- times 값은 null, 빈 배열, 또는 [\"아침\"], [\"점심\"], [\"저녁\"] 등으로 적어도 됩니다. "
+                        "서버에서 dosage 값을 기준으로 실제 복용 시간대를 계산합니다.\n"
+                        "- JSON 바깥에 다른 문장이나 설명을 절대 쓰지 말고, 오직 하나의 JSON 객체만 출력하세요."
+                    )
                 },
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": "이 약봉지 이미지를 분석하여 약 정보를 추출해주세요."
+                            "text": "이 약봉지 이미지를 분석하여 약 정보를 추출해 주세요. JSON만 반환하세요."
                         },
                         {
                             "type": "image_url",
@@ -179,7 +205,12 @@ def ocr():
         
         # 약 이름에서 용량 정보 제거
         if medication_info.get("name"):
-            medication_info["name"] = re.sub(r'\s+\d+[mg|ml|정|알|MG|ML].*$', '', medication_info["name"], flags=re.IGNORECASE).strip()
+            medication_info["name"] = re.sub(
+                r'\s+\d+[mg|ml|정|알|MG|ML].*$',
+                '',
+                medication_info["name"],
+                flags=re.IGNORECASE
+            ).strip()
         
         # 약 이름이 비어있거나 너무 짧으면 저장하지 않음
         if not medication_info.get("name") or len(medication_info.get("name", "")) < 2:
@@ -188,6 +219,30 @@ def ocr():
                 'error': '약 정보를 추출할 수 없습니다. 다시 시도해주세요.'
             }), 400
         
+        # dosage와 days를 안전하게 정수로 변환 (null, 문자열 등 방어)
+        raw_dosage = medication_info.get("dosage", 1)
+        try:
+            dosage_value = int(raw_dosage)
+        except (TypeError, ValueError):
+            dosage_value = 1
+        
+        raw_days = medication_info.get("days", 7)
+        try:
+            days_value = int(raw_days)
+        except (TypeError, ValueError):
+            days_value = 7
+        
+        # 1일 복용 횟수(dosage)에 따라 복용 시간대(times) 자동 설정
+        if dosage_value >= 3:
+            times_list = ["아침", "점심", "저녁"]
+        elif dosage_value == 2:
+            times_list = ["아침", "저녁"]
+        else:  # 1회 또는 그 외
+            times_list = ["저녁"]
+        
+        # 식후로 통일 (식전/식후 구분하지 않음)
+        before_meal = False
+        
         # 식사 시간 정의 (기본값)
         meal_times = {
             "아침": {"hour": 8, "minute": 0},
@@ -195,44 +250,32 @@ def ocr():
             "저녁": {"hour": 18, "minute": 0}
         }
         
-        # 알림 시간 계산 (식전 30분 전, 식후 30분 후)
+        # 알림 시간 계산 (식후 30분 후로 통일)
         notification_times = {}
-        for time in medication_info.get("times", ["아침"]):
-            meal_time = meal_times.get(time, meal_times["아침"])
-            if medication_info.get("before_meal", False):
-                # 식전: 식사 시간 30분 전
-                notification_time = datetime.now().replace(
-                    hour=meal_time["hour"],
-                    minute=meal_time["minute"]
-                ) - timedelta(minutes=30)
-            else:
-                # 식후: 식사 시간 30분 후
-                notification_time = datetime.now().replace(
-                    hour=meal_time["hour"],
-                    minute=meal_time["minute"]
-                ) + timedelta(minutes=30)
+        now = datetime.now()
+        for time_label in times_list:
+            meal_time = meal_times.get(time_label, meal_times["저녁"])
+            notification_time = now.replace(
+                hour=meal_time["hour"],
+                minute=meal_time["minute"],
+                second=0,
+                microsecond=0
+            ) + timedelta(minutes=30)
             
-            notification_times[time] = {
+            notification_times[time_label] = {
                 "hour": notification_time.hour,
                 "minute": notification_time.minute
             }
-        
-        # 약 이름이 비어있으면 저장하지 않음
-        if not medication_info.get("name") or len(medication_info.get("name", "")) < 2:
-            return jsonify({
-                'success': False,
-                'error': '약 이름을 추출할 수 없습니다. 다시 시도해주세요.'
-            }), 400
         
         # 약 정보 저장
         medication_id = len(medications_db) + 1
         medication_data = {
             "id": medication_id,
             "name": medication_info.get("name", ""),
-            "dosage": medication_info.get("dosage", 1),
-            "days": medication_info.get("days", 7),
-            "before_meal": medication_info.get("before_meal", False),
-            "times": medication_info.get("times", ["아침"]),
+            "dosage": dosage_value,
+            "days": days_value,
+            "before_meal": before_meal,
+            "times": times_list,
             "notification_times": notification_times,  # 알림 시간 추가
             "registered_date": datetime.now().isoformat(),
             "image_base64": image_base64  # 나중에 필요할 수 있으므로 저장
@@ -314,26 +357,35 @@ def convert_medication_description():
         
         # 여러 약 이름을 하나의 문자열로
         names_str = ', '.join(medication_names)
+        num_meds = len(medication_names)
         
-        # GPT API를 사용하여 노인 친화적인 설명 생성 (간단하게)
-        prompt = f"""약 이름들: {names_str}
+        # 프롬프트 (줄 수 패딩 X, 없는 약 생성 X)
+        prompt = f"""
+약 이름들: {names_str}
+약은 총 {num_meds}개입니다.
 
-이 약들을 고령층이 이해하기 쉬운 언어로 매우 간단하게 설명해주세요.
-약의 색상, 크기, 형태만 설명하세요.
+각 약을 고령층이 이해하기 쉬운 언어로 아주 간단하게 설명해 주세요.
 
-약이 여러 개면 각 약을 한 줄씩 나열:
-작고 둥근 노란색 약 1알
-크고 캡슐 안에 들어있는 빨간색 약 1알
-을 물과 함께 드세요
+설명 규칙:
+- 약의 색상, 모양, 크기만 설명합니다.
+- 약 이름, 회사 이름, 효능, 복용 시간, 복용 횟수, 용량(mg, ml 등)은 절대 언급하지 않습니다.
+- 실제 색/모양 정보를 알 수 없으면, 일반적인 알약/캡슐의 모양과 색을 상상해서 사용해도 됩니다.
+- 서로 다른 약은 색이나 형태를 조금씩 다르게 해서 구분되도록 해 주세요.
+- "약 정보 없음", "정보 부족", "알 수 없음"과 같은 표현은 절대 사용하지 마세요.
 
-규칙:
-- 약의 색상, 모양, 크기만 간단히 설명
-- 약 이름이나 용량은 언급하지 마세요
-- "지금은 아침 약 시간입니다" 같은 불필요한 설명 제거
-- 형식: "[크기] [형태] [색상] 약 1알"
-- 여러 약이면 각 약을 한 줄씩 나열하고, 마지막에만 "을 물과 함께 드세요" 추가
-- 각 약 설명 사이에는 줄바꿈 사용
-- 마크다운 문법(** 등) 절대 사용하지 말고 순수 텍스트만
+형식 규칙(매우 중요):
+- 출력은 여러 줄 텍스트입니다.
+- 한 줄에는 한 가지 약만 설명합니다.
+- 출력 줄 수는 최대 {num_meds}줄입니다. {num_meds}줄보다 적게 써도 괜찮지만, {num_meds}줄보다 많이 쓰면 안 됩니다.
+- 설명하기 어려운 약이 있으면 그 약은 그냥 생략하고, 그 대신 "정보 없음" 같은 문장은 쓰지 마세요.
+- 줄과 줄 사이는 줄바꿈(\\n)으로만 구분합니다.
+- 한 설명 안에는 줄바꿈을 넣지 말고, 한 줄로만 작성하세요.
+- 마크다운 문법(**, *, _, -, 번호 매기기 등)은 절대 사용하지 마세요.
+
+예시 (약이 3개일 때, 실제 출력에서 '예시:' 라는 말은 쓰지 마세요):
+작은 하얀색 둥근 약 1알
+조금 큰 노란색 타원형 약 1알
+길쭉한 파란색 캡슐 1알
 """
         
         response = client.chat.completions.create(
@@ -341,15 +393,24 @@ def convert_medication_description():
             messages=[
                 {
                     "role": "system",
-                    "content": "당신은 고령층을 위한 약 설명 전문가입니다. 약을 색상, 모양, 크기로 매우 간단하고 짧게 설명해주세요. 약 이름이나 용량은 언급하지 마세요. 마크다운 문법을 절대 사용하지 마세요."
+                    "content": (
+                        "당신은 고령층을 위한 약 설명 전문가입니다. "
+                        "약을 색상, 모양, 크기로만 매우 간단하고 짧게 설명해야 합니다. "
+                        "약 이름, 회사명, 효능, 복용 시간, 복용 횟수, 용량(mg, ml 등)은 절대 언급하지 마세요. "
+                        "여러 약이 있을 때도 새로운 약을 만들어 추가하지 말고, "
+                        "입력으로 받은 약들만 설명하세요. "
+                        "설명하기 어려운 약이 있더라도 "
+                        "'약 정보 없음', '정보 부족', '알 수 없음' 같은 문장은 절대 쓰지 마세요. "
+                        "마크다운 문법은 쓰지 마세요."
+                    )
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            temperature=0.7,
-            max_tokens=150
+            temperature=0.5,
+            max_tokens=200
         )
         
         description = response.choices[0].message.content
@@ -580,4 +641,3 @@ if __name__ == '__main__':
     print()
     
     app.run(debug=True, host='0.0.0.0', port=5001, use_reloader=False)
-
