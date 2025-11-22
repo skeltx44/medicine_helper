@@ -68,7 +68,7 @@
     }
 
     // 백엔드 API URL 설정 (config.js에서 가져오거나 기본값 사용)
-    const API_BASE_URL = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'http://localhost:5001/api';
+    const API_BASE_URL = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'https://sibaljom.onrender.com/api';
     
     // GPT API를 사용한 챗봇 응답 생성
     async function getBotResponse(userMessage) {

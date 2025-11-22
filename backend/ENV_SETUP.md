@@ -19,3 +19,4 @@ OPENAI_API_KEY=sk-proj-kTRWPFKaBYfD43bW5Yo_ptqLd3RcCoh0aCkFcxJlI5zhY5fKgVkNtzXuv
 - `.env` 파일은 절대 Git에 커밋하지 마세요!
 - `.env` 파일은 이미 `.gitignore`에 포함되어 있습니다.
 
+

@@ -73,7 +73,21 @@ sibal/
 
 ## 🚀 시작하기
 
-### 1. 백엔드 서버 설정
+> **⚠️ 중요:** 백엔드는 Render에 배포되어 있습니다 (`https://sibaljom.onrender.com`)
+> 프론트엔드는 로컬에서 실행하지만, API는 Render 서버를 호출합니다.
+
+### 프론트엔드 실행
+
+```bash
+# Python HTTP 서버 사용
+python -m http.server 8080
+
+# 브라우저에서 http://localhost:8080 접속
+```
+
+### 로컬 백엔드 개발 (선택사항)
+
+로컬에서 백엔드를 개발하고 싶다면:
 
 자세한 설정 방법은 `SETUP.md` 파일을 참고하세요.
 
@@ -83,20 +97,16 @@ python -m venv venv
 venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 
-# OpenAI API 키 설정
-set OPENAI_API_KEY=your-api-key-here  # Windows
-export OPENAI_API_KEY=your-api-key-here  # Linux/Mac
+# .env 파일 생성 (OPENAI_API_KEY 설정)
+# backend/.env 파일에 다음 내용 추가:
+# OPENAI_API_KEY=your-api-key-here
 
 python app.py
 ```
 
-### 2. 프론트엔드 실행
-
-```bash
-# Python HTTP 서버 사용
-python -m http.server 8080
-
-# 브라우저에서 http://localhost:8080 접속
+로컬 백엔드를 사용하려면 `config.js`에서 API URL을 변경하세요:
+```javascript
+BASE_URL: 'http://localhost:5001/api'
 ```
 
 ## ⚙️ API 엔드포인트

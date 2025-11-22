@@ -107,7 +107,7 @@
                 }
 
                 // 서버에 사용자 정보 저장
-                const API_BASE_URL = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'http://localhost:5001/api';
+                const API_BASE_URL = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'https://sibaljom.onrender.com/api';
                 fetch(`${API_BASE_URL}/users`, {
                     method: 'POST',
                     headers: {
