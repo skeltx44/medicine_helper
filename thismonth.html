@@ -58,37 +58,21 @@
         let currentMonth = now.getMonth();
         let dailyStatuses = {}; // 날짜별 복용 상태 저장
 
-        // 일일 복용 상태 불러오기
+        // 일일 복용 상태 불러오기 (백엔드 /api/history/month 엔드포인트 사용)
         async function loadDailyStatuses(year, month) {
             try {
-                const response = await fetch(`${API_BASE_URL}/daily-status?year=${year}&month=${month + 1}`);
+                const response = await fetch(`${API_BASE_URL}/history/month?year=${year}&month=${month + 1}`);
                 if (response.ok) {
                     const data = await response.json();
-                    dailyStatuses = data.statuses || {};
+                    // 백엔드 응답에서 daily_status 추출
+                    dailyStatuses = data.daily_status || {};
+                } else {
+                    console.error('일일 상태 불러오기 실패:', response.status);
+                    dailyStatuses = {}; // 에러 시 빈 객체로 초기화
                 }
             } catch (error) {
                 console.error('일일 상태 불러오기 오류:', error);
-            }
-        }
-
-        // 저녁 7시 체크 (페이지 로드 시 또는 주기적으로)
-        async function checkEveningStatus() {
-            const now = new Date();
-            if (now.getHours() >= 19) {
-                try {
-                    await fetch(`${API_BASE_URL}/daily-status/check-evening`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        }
-                    });
-                    // 상태 다시 불러오기
-                    await loadDailyStatuses(currentYear, currentMonth);
-                    // 달력 다시 그리기
-                    generateCalendar(currentYear, currentMonth);
-                } catch (error) {
-                    console.error('저녁 상태 확인 오류:', error);
-                }
+                dailyStatuses = {}; // 에러 시 빈 객체로 초기화
             }
         }
 
@@ -206,12 +190,9 @@
                 // 날짜 문자열 생성 (YYYY-MM-DD 형식)
                 const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                 
-                // 저장된 상태가 있으면 표시
-                if (dailyStatuses[dateStr]) {
-                    addStatusMark(markContainer, dailyStatuses[dateStr]);
-                }
-                
-                // 클릭 이벤트 제거 (자동으로 표시되므로 수동 클릭 불가)
+                // 저장된 상태가 있으면 표시, 없으면 기본값 'X'
+                const status = dailyStatuses[dateStr] || 'X';
+                addStatusMark(markContainer, status);
                 
                 calendarGrid.appendChild(dayElement);
             }
@@ -236,15 +217,9 @@
             }
         }
         
-        // 페이지 로드 시 달력 생성 및 저녁 7시 체크
+        // 페이지 로드 시 달력 생성
         async function initCalendar() {
-            await checkEveningStatus();
             await generateCalendar(currentYear, currentMonth);
-            
-            // 주기적으로 저녁 7시 체크 (1분마다)
-            setInterval(async () => {
-                await checkEveningStatus();
-            }, 60 * 1000);
         }
         
         if (document.readyState === 'loading') {
