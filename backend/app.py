@@ -4,8 +4,12 @@ import os
 import base64
 import json
 from datetime import datetime, timedelta
-import openai
+from dotenv import load_dotenv
 from openai import OpenAI
+
+# .env 파일에서 환경변수 로드 (로컬 개발용)
+# Render 등 클라우드 배포 시에는 환경변수를 직접 설정하면 됩니다
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)  # CORS 허용
@@ -15,11 +19,27 @@ print(f"[DEBUG] Flask 앱 생성됨: {app.name}")
 print(f"[DEBUG] Flask 앱 파일 위치: {__file__}")
 
 # OpenAI API 키 설정
-# 환경변수가 있으면 우선 사용, 없으면 기본값(하드코딩) 사용
-# 개발자 팀이 공유하는 API 키를 사용합니다
-DEFAULT_API_KEY = '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'
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', DEFAULT_API_KEY)
-client = OpenAI(api_key=OPENAI_API_KEY)
+# 환경변수 OPENAI_API_KEY에서 가져옵니다
+# 
+# 로컬 개발 시:
+#   1. backend 폴더에 .env 파일 생성
+#   2. .env 파일에 다음 내용 추가: OPENAI_API_KEY=your-api-key-here
+#
+# Render 배포 시:
+#   1. Render 대시보드에서 프로젝트 선택
+#   2. Settings > Environment Variables 메뉴로 이동
+#   3. Key: OPENAI_API_KEY, Value: your-api-key-here 추가
+#   4. Save Changes 후 서비스 재배포
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if not OPENAI_API_KEY:
+    print("[경고] OPENAI_API_KEY 환경변수가 설정되지 않았습니다!")
+    print("[경고] 챗봇, OCR, 약 설명 변환 기능이 작동하지 않습니다.")
+    print("[경고] .env 파일을 생성하거나 환경변수를 설정해주세요.")
+    client = None
+else:
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    print("[INFO] OpenAI API 키가 설정되었습니다.")
 
 # 약 데이터 저장소 (실제로는 데이터베이스를 사용해야 함)
 medications_db = []
@@ -39,6 +59,9 @@ def chat():
     """
     GPT API를 사용한 챗봇 응답
     """
+    if not client:
+        return jsonify({'error': 'OpenAI API 키가 설정되지 않았습니다. 환경변수 OPENAI_API_KEY를 설정해주세요.'}), 500
+    
     try:
         data = request.json
         user_message = data.get('message', '')
@@ -84,6 +107,9 @@ def ocr():
     약봉지 이미지 OCR 처리 및 약 정보 추출
     Vision API 사용
     """
+    if not client:
+        return jsonify({'error': 'OpenAI API 키가 설정되지 않았습니다. 환경변수 OPENAI_API_KEY를 설정해주세요.'}), 500
+    
     try:
         data = request.json
         image_base64 = data.get('image', '')
@@ -275,6 +301,9 @@ def convert_medication_description():
     """
     약 정보를 노인 친화적인 설명으로 변환 (간단하게, 여러 약 지원)
     """
+    if not client:
+        return jsonify({'error': 'OpenAI API 키가 설정되지 않았습니다. 환경변수 OPENAI_API_KEY를 설정해주세요.'}), 500
+    
     try:
         data = request.json
         medication_names = data.get('names', [])  # 여러 약 이름 리스트
