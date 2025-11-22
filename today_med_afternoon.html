@@ -196,6 +196,14 @@
                     });
                     localStorage.setItem('medication_history', JSON.stringify(history));
 
+                    // 일일 상태 업데이트 확인 (백엔드에서 자동으로 처리됨)
+                    const today = new Date().toISOString().split('T')[0];
+                    try {
+                        await fetch(`${API_BASE_URL}/daily-status?date=${today}`);
+                    } catch (error) {
+                        console.error('일일 상태 확인 오류:', error);
+                    }
+
                     // 토스트 메시지 표시
                     toastMessage.classList.add('show');
                     
