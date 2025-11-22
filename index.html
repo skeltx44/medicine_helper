@@ -139,6 +139,49 @@
                 }).catch(error => {
                     console.error('사용자 정보 저장 오류:', error);
                 });
+
+                // ✅ 로그인한 사용자 전화번호를 Android에 저장
+                if (window.AndroidBridge && typeof AndroidBridge.saveUserPhone === "function") {
+                    AndroidBridge.saveUserPhone(phone);
+                }
+
+                // ✅ 로그인 시 사용자에게 SMS 전송 (모바일 기기에서 직접)
+                if (window.AndroidBridge && typeof AndroidBridge.sendSMS === "function") {
+                    const loginMessage = "로그인이 완료되었습니다. 복약 알림이 시작됩니다.";
+                    AndroidBridge.sendSMS(phone, loginMessage);
+                }
+
+                // ✅ 보호자 전화번호 찾기 및 일정 시간 후 SMS 전송
+                // 회원가입 정보에서 보호자 전화번호 찾기
+                const API_BASE_URL2 = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'https://sibaljom.onrender.com/api';
+                fetch(`${API_BASE_URL2}/users`)
+                    .then(response => response.json())
+                    .then(data => {
+                        // 같은 전화번호로 회원가입한 사용자 찾기
+                        const signupUser = data.users?.find(u => 
+                            u.phone === phone && 
+                            u.type === 'signup' && 
+                            u.guardian_phone
+                        );
+                        
+                        if (signupUser && signupUser.guardian_phone) {
+                            const guardianPhone = signupUser.guardian_phone;
+                            
+                            // 5분 후 보호자에게 SMS 전송 (설정 가능)
+                            const delayMinutes = 5; // 분 단위
+                            const delayMs = delayMinutes * 60 * 1000;
+                            
+                            setTimeout(() => {
+                                if (window.AndroidBridge && typeof AndroidBridge.sendSMS === "function") {
+                                    const guardianMessage = `복약 알림: ${phone}님의 복약 알림이 시작되었습니다.`;
+                                    AndroidBridge.sendSMS(guardianPhone, guardianMessage);
+                                }
+                            }, delayMs);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('보호자 전화번호 조회 오류:', error);
+                    });
                 
                 // 로그인 후 처음 진입임을 표시하는 플래그 설정
                 sessionStorage.setItem('fromLogin', 'true');
