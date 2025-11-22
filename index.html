@@ -141,18 +141,24 @@
                 });
 
                 // ✅ 로그인한 사용자 전화번호를 Android에 저장
+                //    웹(PC브라우저)에서 열 때는 AndroidBridge가 없으니 안전하게 체크
                 if (window.AndroidBridge && typeof AndroidBridge.saveUserPhone === "function") {
                     AndroidBridge.saveUserPhone(phone);
                 }
-
-                // ✅ 로그인 시 사용자에게 SMS 전송 (모바일 기기에서 직접)
+                
+                // ✅ 사용자에게 10초 후 SMS 전송
                 if (window.AndroidBridge && typeof AndroidBridge.sendSMS === "function") {
-                    const loginMessage = "로그인이 완료되었습니다. 복약 알림이 시작됩니다.";
-                    AndroidBridge.sendSMS(phone, loginMessage);
+                    setTimeout(() => {
+                        const userMessage = "로그인이 완료되었습니다. 복약 알림이 시작됩니다.";
+                        AndroidBridge.sendSMS(phone, userMessage);
+                    }, 10 * 1000); // 10초 = 10 * 1000ms
+                } else if (window.AndroidBridge && typeof AndroidBridge.onLoginSuccess === "function") {
+                    // sendSMS가 없으면 기존 onLoginSuccess 사용 (즉시 전송)
+                    AndroidBridge.onLoginSuccess(phone);
                 }
-
-                // ✅ 보호자 전화번호 찾기 및 일정 시간 후 SMS 전송
-                // 회원가입 정보에서 보호자 전화번호 찾기
+                
+                // ✅ 보호자 전화번호 찾기 및 10초 후 SMS 전송
+                //    회원가입 정보에서 보호자 전화번호를 찾아서 안드로이드에 전달
                 const API_BASE_URL2 = (typeof API_CONFIG !== 'undefined' && API_CONFIG.BASE_URL) || 'https://sibaljom.onrender.com/api';
                 fetch(`${API_BASE_URL2}/users`)
                     .then(response => response.json())
@@ -167,16 +173,17 @@
                         if (signupUser && signupUser.guardian_phone) {
                             const guardianPhone = signupUser.guardian_phone;
                             
-                            // 5분 후 보호자에게 SMS 전송 (설정 가능)
-                            const delayMinutes = 5; // 분 단위
-                            const delayMs = delayMinutes * 60 * 1000;
-                            
-                            setTimeout(() => {
-                                if (window.AndroidBridge && typeof AndroidBridge.sendSMS === "function") {
+                            // 안드로이드 네이티브에 보호자 전화번호 전달
+                            // 10초 후 보호자에게 SMS 전송
+                            if (window.AndroidBridge && typeof AndroidBridge.sendSMS === "function") {
+                                setTimeout(() => {
                                     const guardianMessage = `복약 알림: ${phone}님의 복약 알림이 시작되었습니다.`;
                                     AndroidBridge.sendSMS(guardianPhone, guardianMessage);
-                                }
-                            }, delayMs);
+                                }, 10 * 1000); // 10초 = 10 * 1000ms
+                            } else if (window.AndroidBridge && typeof AndroidBridge.scheduleGuardianSMS === "function") {
+                                // scheduleGuardianSMS가 있으면 사용 (10초 후)
+                                AndroidBridge.scheduleGuardianSMS(phone, guardianPhone, 10);
+                            }
                         }
                     })
                     .catch(error => {
