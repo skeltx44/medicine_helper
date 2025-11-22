@@ -45,6 +45,10 @@ else:
 medications_db = []
 medication_history_db = []
 
+# 일일 복용 상태 저장소 (날짜별 O/X 표시용)
+# 형식: { "date": "2025-01-15", "status": "O" or "X", "updated_at": "..." }
+daily_status_db = []
+
 # 사용자 데이터 저장소
 users_db = []
 
@@ -473,15 +477,20 @@ def complete_medication():
         if not medication_id:
             return jsonify({'error': '약 ID가 필요합니다.'}), 400
         
+        today = datetime.now().date().isoformat()
+        
         # 복용 기록 저장
         record = {
             'medication_id': medication_id,
             'time': time,
             'completed_at': datetime.now().isoformat(),
-            'date': datetime.now().date().isoformat()
+            'date': today
         }
         
         medication_history_db.append(record)
+        
+        # 일일 복용 상태 업데이트
+        update_daily_status(today)
         
         return jsonify({
             'success': True,
@@ -491,6 +500,197 @@ def complete_medication():
     except Exception as e:
         print(f"복용 기록 오류: {str(e)}")
         return jsonify({'error': f'복용 기록 저장 중 오류가 발생했습니다: {str(e)}'}), 500
+
+
+def update_daily_status(date_str):
+    """일일 복용 상태 업데이트 (아침, 점심, 저녁 모두 완료 시 O, 아니면 상태 유지)"""
+    try:
+        # 해당 날짜의 모든 복용 기록 가져오기
+        day_records = [r for r in medication_history_db if r.get('date') == date_str]
+        
+        # 오늘 복용해야 할 약 목록 가져오기
+        today_meds = []
+        for med in medications_db:
+            if not med.get('registered_date'):
+                continue
+            registered_date = datetime.fromisoformat(med['registered_date']).date()
+            days_diff = (datetime.fromisoformat(date_str).date() - registered_date).days
+            if 0 <= days_diff < med.get('days', 7):
+                for time in med.get('times', []):
+                    today_meds.append({
+                        'medication_id': med['id'],
+                        'time': time
+                    })
+        
+        if not today_meds:
+            # 오늘 복용할 약이 없으면 상태 업데이트 안 함
+            return
+        
+        # 각 시간대별로 완료 여부 확인
+        morning_complete = any(r['time'] == '아침' for r in day_records)
+        afternoon_complete = any(r['time'] == '점심' for r in day_records)
+        evening_complete = any(r['time'] == '저녁' for r in day_records)
+        
+        # 각 시간대에 복용해야 할 약이 있는지 확인
+        has_morning = any(m['time'] == '아침' for m in today_meds)
+        has_afternoon = any(m['time'] == '점심' for m in today_meds)
+        has_evening = any(m['time'] == '저녁' for m in today_meds)
+        
+        # 모든 시간대가 완료되었는지 확인
+        all_complete = True
+        if has_morning and not morning_complete:
+            all_complete = False
+        if has_afternoon and not afternoon_complete:
+            all_complete = False
+        if has_evening and not evening_complete:
+            all_complete = False
+        
+        # 일일 상태 업데이트 또는 생성
+        existing_status = next((s for s in daily_status_db if s.get('date') == date_str), None)
+        
+        if all_complete:
+            # 모든 약을 다 먹었으면 O 표시
+            if existing_status:
+                existing_status['status'] = 'O'
+                existing_status['updated_at'] = datetime.now().isoformat()
+            else:
+                daily_status_db.append({
+                    'date': date_str,
+                    'status': 'O',
+                    'updated_at': datetime.now().isoformat()
+                })
+        # 완료되지 않았으면 상태를 업데이트하지 않음 (저녁 7시에 X로 설정될 수 있음)
+        
+    except Exception as e:
+        print(f"일일 상태 업데이트 오류: {str(e)}")
+
+
+@app.route('/api/daily-status', methods=['GET'])
+def get_daily_status():
+    """일일 복용 상태 조회"""
+    try:
+        date_str = request.args.get('date')
+        year = request.args.get('year')
+        month = request.args.get('month')
+        
+        if date_str:
+            # 특정 날짜의 상태 조회
+            status = next((s for s in daily_status_db if s.get('date') == date_str), None)
+            return jsonify({
+                'status': status.get('status') if status else None,
+                'date': date_str
+            })
+        elif year and month:
+            # 해당 월의 모든 상태 조회
+            month_statuses = {}
+            for status in daily_status_db:
+                status_date = datetime.fromisoformat(status['date']).date()
+                if status_date.year == int(year) and status_date.month == int(month):
+                    month_statuses[status['date']] = status['status']
+            
+            return jsonify({
+                'statuses': month_statuses,
+                'year': year,
+                'month': month
+            })
+        else:
+            return jsonify({'error': 'date 또는 year, month 파라미터가 필요합니다.'}), 400
+            
+    except Exception as e:
+        print(f"일일 상태 조회 오류: {str(e)}")
+        return jsonify({'error': f'일일 상태 조회 중 오류가 발생했습니다: {str(e)}'}), 500
+
+
+@app.route('/api/daily-status/check-evening', methods=['POST'])
+def check_evening_status():
+    """저녁 7시에 미완료된 날짜에 X 표시"""
+    try:
+        now = datetime.now()
+        # 저녁 7시 이후인지 확인
+        if now.hour < 19:
+            return jsonify({
+                'message': '저녁 7시가 아닙니다.',
+                'current_hour': now.hour
+            })
+        
+        today = now.date().isoformat()
+        
+        # 오늘 날짜의 상태 확인
+        existing_status = next((s for s in daily_status_db if s.get('date') == today), None)
+        
+        # 이미 O 표시가 있으면 업데이트하지 않음
+        if existing_status and existing_status.get('status') == 'O':
+            return jsonify({
+                'message': '이미 완료 상태입니다.',
+                'status': 'O'
+            })
+        
+        # 오늘의 복용 기록 확인
+        day_records = [r for r in medication_history_db if r.get('date') == today]
+        
+        # 오늘 복용해야 할 약 목록 확인
+        today_meds = []
+        for med in medications_db:
+            if not med.get('registered_date'):
+                continue
+            registered_date = datetime.fromisoformat(med['registered_date']).date()
+            days_diff = (datetime.fromisoformat(today).date() - registered_date).days
+            if 0 <= days_diff < med.get('days', 7):
+                for time in med.get('times', []):
+                    today_meds.append({
+                        'medication_id': med['id'],
+                        'time': time
+                    })
+        
+        if not today_meds:
+            # 오늘 복용할 약이 없으면 X 표시 안 함
+            return jsonify({
+                'message': '오늘 복용할 약이 없습니다.'
+            })
+        
+        # 각 시간대별로 완료 여부 확인
+        morning_complete = any(r['time'] == '아침' for r in day_records)
+        afternoon_complete = any(r['time'] == '점심' for r in day_records)
+        evening_complete = any(r['time'] == '저녁' for r in day_records)
+        
+        has_morning = any(m['time'] == '아침' for m in today_meds)
+        has_afternoon = any(m['time'] == '점심' for m in today_meds)
+        has_evening = any(m['time'] == '저녁' for m in today_meds)
+        
+        # 모든 시간대가 완료되었는지 확인
+        all_complete = True
+        if has_morning and not morning_complete:
+            all_complete = False
+        if has_afternoon and not afternoon_complete:
+            all_complete = False
+        if has_evening and not evening_complete:
+            all_complete = False
+        
+        if not all_complete:
+            # 완료되지 않았으면 X 표시
+            if existing_status:
+                existing_status['status'] = 'X'
+                existing_status['updated_at'] = datetime.now().isoformat()
+            else:
+                daily_status_db.append({
+                    'date': today,
+                    'status': 'X',
+                    'updated_at': datetime.now().isoformat()
+                })
+            return jsonify({
+                'success': True,
+                'status': 'X',
+                'date': today
+            })
+        else:
+            return jsonify({
+                'message': '모든 약을 복용했습니다.',
+                'status': 'O'
+            })
+            
+    except Exception as e:
+        print(f"저녁 상태 확인 오류: {str(e)}")
+        return jsonify({'error': f'저녁 상태 확인 중 오류가 발생했습니다: {str(e)}'}), 500
 
 
 @app.route('/api/history', methods=['GET'])
