@@ -123,9 +123,10 @@ def chat():
 @app.route('/api/ocr', methods=['POST'])
 def ocr():
     """
-    약봉지 이미지 OCR 처리 및 약 정보 추출
-    Vision API 사용
-    - 여러 약이 있으면 medications 배열로 여러 개 등록
+    약봉지 이미지 OCR 처리 및 약 정보 추출 (2단계 방식)
+    1) 이미지에서 보이는 모든 텍스트를 최대한 OCR
+    2) 그 텍스트에서 약 정보만 JSON으로 추출
+    - 여러 약이 있으면 medications 배열에 여러 개 등록
     """
     if not client:
         return jsonify({'error': 'OpenAI API 키가 설정되지 않았습니다. 환경변수 OPENAI_API_KEY를 설정해주세요.'}), 500
@@ -140,59 +141,19 @@ def ocr():
         # base64 데이터에서 헤더 제거 (data:image/jpeg;base64, 부분)
         if ',' in image_base64:
             image_base64 = image_base64.split(',')[1]
-        
-        # GPT Vision API를 사용하여 약봉지 정보 추출
-        response = client.chat.completions.create(
-            model="gpt-4o",
+        # ------------ 1단계: OCR (이미지 → 전체 텍스트) ------------
+        ocr_response = client.chat.completions.create(
+            model="gpt-4o",  # Vision 지원 모델
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "당신은 한국 약봉투 이미지를 분석하는 전문가입니다.\n"
-                        "이미지에서 다음 정보를 JSON 형식으로 매우 신중하게, 정확하게 추출해주세요.\n"
-                        "반드시 아래 스키마와 키 이름을 그대로 사용하고, "
-                        "JSON 외의 다른 설명 텍스트는 절대 출력하지 마세요.\n\n"
-                        "{\n"
-                        "  \"name\": \"약 이름 문자열\",\n"
-                        "  \"dosage\": 1일 복용 횟수(정수, 예: 3),\n"
-                        "  \"days\": 총 복용 일수(정수, 예: 7),\n"
-                        "  \"before_meal\": true 또는 false,\n"
-                        "  \"times\": [\"아침\", \"점심\", \"저녁\"] 중 일부를 요소로 갖는 배열,\n"
-                        "  \"medications\": [\n"
-                        "    {\n"
-                        "      \"name\": \"약 이름 문자열\",\n"
-                        "      \"dosage\": 1일 복용 횟수(정수),\n"
-                        "      \"days\": 총 복용 일수(정수),\n"
-                        "      \"before_meal\": true 또는 false,\n"
-                        "      \"times\": [\"아침\", \"점심\", \"저녁\"] 중 일부\n"
-                        "    }\n"
-                        "  ]\n"
-                        "}\n\n"
-                        "위 스키마의 name, dosage, days, before_meal, times 키는 "
-                        "최상위에 한 번씩 포함하고, 여러 약이 있을 경우 medications 배열에도 각 약 정보를 넣어주세요.\n\n"
-                        "중요: 약봉투에 다음과 같이 적힌 경우 숫자를 정확히 해석해야 합니다.\n"
-                        "- \"1일 1회\", \"하루 1번\" 등은 모두 dosage: 1 로 설정합니다.\n"
-                        "- \"1일 2회\" 는 dosage: 2 로 설정합니다.\n"
-                        "- \"1일 3회\" 는 dosage: 3 으로 설정합니다.\n"
-                        "days도 \"3일분\", \"7일분\" 처럼 적힌 경우 안의 숫자만 사용해 정수로 설정합니다.\n\n"
-                        "추가 규칙:\n"
-                        "- 약봉투에 서로 다른 약이 여러 개 적혀 있다면, 각 약을 medications 배열의 별도 원소로 넣으세요.\n"
-                        "- 정보가 애매하거나 잘 안 보이면 절대 추측하지 말고 해당 필드는 null로 두세요.\n"
-                        "  - 예시: 복용 횟수가 잘 보이지 않으면 dosage는 null로 두세요.\n"
-                        "  - 예시: 복용 일수가 안 보이면 days는 null로 두세요.\n"
-                        "- \"dosage\"와 \"days\"는 반드시 정수(또는 정수로 해석 가능한 값)로 추출하세요. "
-                        "\"3회\", \"3일분\"처럼 적혀 있어도 숫자 3만 남기세요.\n"
-                        "- 약 이름이 명확히 안 보이면 name은 null로 두세요.\n"
-                        "- 아무 약도 확실하게 읽을 수 없다면 medications는 빈 배열 []로 두세요.\n\n"
-                        "주의:\n"
-                        "- 정보를 추측해서 채우지 마세요. 불확실하면 해당 필드는 null로 두세요.\n"
-                        "- 위 스키마의 최상위 필드(name, dosage, days, before_meal, times)는 "
-                        "medications 배열과 별개로 반드시 포함해야 합니다.\n"
-                        "- before_meal 값은 특별한 경우가 아니라면 false로 설정해도 됩니다.\n"
-                        "- times 값은 null, 빈 배열, 또는 [\"아침\"], [\"점심\"], [\"저녁\"] 등으로 적어도 됩니다. "
-                        "서버에서 dosage 값을 기준으로 실제 복용 시간대를 계산합니다.\n"
-                        "- JSON 바깥에 다른 문장이나 설명을 절대 쓰지 말고, 오직 하나의 JSON 객체만 출력하세요.\n"
-                        "- 답변을 출력하기 전에, 숫자(dosage, days)가 약봉투 내용과 일치하는지 한 번 더 천천히 검토한 뒤에 최종 JSON을 반환하세요."
+                        "당신은 OCR 엔진입니다. "
+                        "주어진 약봉투 사진에서 사람이 읽을 수 있는 모든 글자를 가능한 한 많이 그대로 적어주세요. "
+                        "줄바꿈도 대략적으로 유지하려고 노력하고, 글자가 애매하면 보이는 대로 추측해서 한글/숫자를 적어도 됩니다. "
+                        "중요: 요약, 해석, 설명, 번역을 하지 말고, 이미지에서 읽은 텍스트를 그대로 적어주세요. "
+                        "문장이 끊기거나 철자가 조금 이상해도 괜찮습니다. "
+                        "오직 이미지에서 읽은 텍스트만 출력하세요."
                     )
                 },
                 {
@@ -200,7 +161,7 @@ def ocr():
                     "content": [
                         {
                             "type": "text",
-                            "text": "이 약봉지 이미지를 분석하여 약 정보를 추출해 주세요. JSON만 반환하세요."
+                            "text": "이 약봉투에서 보이는 글자를 전부 그대로 적어주세요."
                         },
                         {
                             "type": "image_url",
@@ -211,36 +172,88 @@ def ocr():
                     ]
                 }
             ],
-            temperature=0.1,
-            max_tokens=700
+            temperature=0.0,
+            max_tokens=1200
         )
-        
-        # 응답 파싱
-        response_text = response.choices[0].message.content.strip()
-
-        # 코드블록 제거 시도
-        cleaned = response_text
-        if cleaned.startswith("```"):
-            cleaned = re.sub(r'^```(?:json)?', '', cleaned, flags=re.IGNORECASE).strip()
-            cleaned = re.sub(r'```$', '', cleaned).strip()
-
-        medication_info = {}
+        ocr_text = ocr_response.choices[0].message.content.strip()
+        # 혹시 모를 코드블록 제거
+        if ocr_text.startswith("```"):
+            ocr_text = re.sub(r'^```(?:[a-zA-Z]+)?', '', ocr_text).strip()
+            ocr_text = re.sub(r'```$', '', ocr_text).strip()
+        # ------------ 2단계: 텍스트 → 약 정보 JSON 추출 ------------
+        extract_system = (
+            "당신은 한국 약봉투 인식 및 정보 추출 전문가입니다.\n"
+            "아래는 OCR로 추출한 원문 텍스트입니다. 이 텍스트 안에서 약 정보를 찾아 JSON으로 정리하세요.\n\n"
+            "요구 스키마(반드시 이 키들을 사용해야 합니다):\n"
+            "{\n"
+            "  \"raw_text\": \"OCR로 읽은 전체 텍스트 문자열\",\n"
+            "  \"name\": \"첫 번째 약 이름 또는 null\",\n"
+            "  \"dosage\": 1일 복용 횟수(정수 또는 null),\n"
+            "  \"days\": 총 복용 일수(정수 또는 null),\n"
+            "  \"before_meal\": true 또는 false 또는 null,\n"
+            "  \"times\": [\"아침\", \"점심\", \"저녁\"] 중 일부 또는 빈 배열,\n"
+            "  \"medications\": [\n"
+            "    {\n"
+            "      \"name\": \"약 이름 문자열 또는 null\",\n"
+            "      \"dosage\": 1일 복용 횟수(정수 또는 null),\n"
+            "      \"days\": 총 복용 일수(정수 또는 null),\n"
+            "      \"before_meal\": true 또는 false 또는 null,\n"
+            "      \"times\": [\"아침\", \"점심\", \"저녁\"] 중 일부 또는 빈 배열\n"
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "중요 규칙:\n"
+            "- 약 이름은 OCR 텍스트에 실제로 등장하는 단어들만 사용하세요. 텍스트에 없는 새로운 약 이름을 새로 만들지 마세요.\n"
+            "- 철자가 조금 틀리거나 몇 글자가 빠져도 괜찮습니다. 보이는 대로 최대한 비슷하게 적으세요.\n"
+            "- \"1일 1회\", \"하루 1번\" → dosage: 1 로 설정합니다.\n"
+            "- \"1일 2회\" → dosage: 2 로 설정합니다.\n"
+            "- \"1일 3회\" → dosage: 3 으로 설정합니다.\n"
+            "- \"3일분\", \"7일분\" 처럼 되어 있으면 안의 숫자만 뽑아서 days에 정수로 넣으세요.\n"
+            "- 복용 횟수나 일수가 텍스트에서 전혀 보이지 않으면 해당 필드는 null로 두세요.\n"
+            "- before_meal은 식전/식후/공복 등 정보가 보일 때만 true/false로 설정하고, 전혀 없으면 null로 두어도 됩니다.\n"
+            "- 여러 약이 적혀 있다면 medications 배열에 약마다 하나씩 객체를 넣으세요.\n"
+            "- 약이 하나도 확실하지 않으면 medications는 빈 배열 [] 로 두고, name도 null로 두세요.\n"
+            "- 가능한 한 버리지 말고, 애매해도 약 이름으로 보이는 것은 최대한 살려서 넣으세요.\n\n"
+            "출력 형식(매우 중요):\n"
+            "- 오직 하나의 JSON 객체만 출력하세요.\n"
+            "- JSON 바깥에 다른 설명, 문장, 주석, 텍스트는 절대 쓰지 마세요.\n"
+            "- JSON은 표준 형식을 지키고, 마지막 원소 뒤에 쉼표(,)를 두지 마세요.\n"
+        )
+        extract_user = (
+            "다음은 OCR로 읽은 원문 텍스트입니다:\n\n"
+            "----- OCR TEXT START -----\n"
+            f"{ocr_text}\n"
+            "----- OCR TEXT END -----\n\n"
+            "위 텍스트에서 약 정보를 추출하여, 앞에서 설명한 스키마에 맞는 JSON 하나를 만들어 주세요."
+        )
+        extract_response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": extract_system},
+                {"role": "user", "content": extract_user}
+            ],
+            temperature=0.1,
+            max_tokens=900
+        )
+        json_text = extract_response.choices[0].message.content.strip()
+        # 혹시 코드블록으로 감싸져 있으면 제거
+        if json_text.startswith("```"):
+            json_text = re.sub(r'^```(?:json)?', '', json_text, flags=re.IGNORECASE).strip()
+            json_text = re.sub(r'```$', '', json_text).strip()
+        # JSON 파싱
         try:
-            medication_info = json.loads(cleaned)
-        except Exception:
-            # 실패하면 예전 방식으로 백업: 첫 번째 {} 블록만 파싱
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                try:
-                    medication_info = json.loads(json_match.group())
-                except Exception:
-                    medication_info = {}
-            else:
-                medication_info = {}
+            medication_info = json.loads(json_text)
+        except Exception as e:
+            print("[OCR] JSON 파싱 실패:", e)
+            print("[OCR] 원본 JSON 텍스트:", json_text[:500])
+            return jsonify({
+                "success": False,
+                "error": "약 정보를 JSON으로 파싱하는 데 실패했습니다. 다시 시도해주세요."
+            }), 400
 
         # medications 배열이 있으면 그걸 사용, 없으면 단일 객체로 처리
         medications_raw = []
-        if isinstance(medication_info, dict) and isinstance(medication_info.get("medications"), list) and len(medication_info["medications"]) > 0:
+        if isinstance(medication_info, dict) and isinstance(medication_info.get("medications"), list):
             medications_raw = medication_info["medications"]
         elif isinstance(medication_info, dict) and medication_info:
             medications_raw = [medication_info]
@@ -263,11 +276,11 @@ def ocr():
                     flags=re.IGNORECASE
                 ).strip()
 
-            # 이름이 비어있거나 너무 짧으면 스킵
-            if not name or len(name) < 2:
+            # 이름이 완전 비어 있으면 스킵
+            if not name or len(name.strip()) == 0:
                 continue
 
-            # dosage와 days를 안전하게 정수로 변환
+            # dosage와 days를 안전하게 정수로 변환 (없으면 기본값 사용)
             raw_dosage = raw_med.get("dosage", medication_info.get("dosage", 1))
             dosage_value = safe_int(raw_dosage, 1)
 
@@ -282,7 +295,7 @@ def ocr():
             else:  # 1회 또는 그 외
                 times_list = ["저녁"]
 
-            # 식후로 통일
+            # 식후로 통일 (before_meal은 false)
             before_meal = False
 
             # 식사 시간 정의 (기본값)
@@ -341,7 +354,7 @@ def ocr():
         })
         
     except Exception as e:
-        print(f"OCR 오류: {str(e)}")
+        print(f"OCR 전체 파이프라인 오류: {str(e)}")
         return jsonify({'error': f'이미지 분석 중 오류가 발생했습니다: {str(e)}'}), 500
 
 
