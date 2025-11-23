@@ -8,11 +8,15 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 # .env 파일에서 환경변수 로드 (로컬 개발용)
+# Render 등 클라우드 배포 시에는 환경변수를 직접 설정하면 됩니다
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)  # CORS 허용
 
+# 디버깅: 앱이 제대로 생성되었는지 확인
+print(f"[DEBUG] Flask 앱 생성됨: {app.name}")
+print(f"[DEBUG] Flask 앱 파일 위치: {__file__}")
 
 # OpenAI API 키 설정
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -26,12 +30,15 @@ else:
     client = OpenAI(api_key=OPENAI_API_KEY)
     print("[INFO] OpenAI API 키가 설정되었습니다.")
 
-# 간단한 인메모리 "DB"
-medications_db = []         # 약 정보
-medication_history_db = []  # 복용 내역
-users_db = []               # 사용자 정보
+# 약 데이터 저장소 (실제로는 데이터베이스를 사용해야 함)
+medications_db = []
+medication_history_db = []
 
-UPLOAD_FOLDER = "uploads"
+# 사용자 데이터 저장소
+users_db = []
+
+# 이미지 저장 디렉토리
+UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
@@ -58,71 +65,83 @@ def safe_int(value, default):
     except Exception:
         return default
 
-def normalize_name(name: str) -> str:
-    """
-    약 이름 비교용 정규화:
-    - 뒤쪽 용량/단위(숫자 + mg/ml/정/알 등) 제거
-    - 앞뒤 공백 제거
-    """
-    if not isinstance(name, str):
-        return ""
-    n = re.sub(
-        r'\s+\d+\s*(?:mg|ml|정|알|MG|ML)\b.*$',
-        '',
-        name,
-        flags=re.IGNORECASE
-    ).strip()
-    return n
+# -------- 표 한 줄을 "약 1개"로 보는 매우 느슨한 파서 --------
 
-def extract_table_medications(raw_text: str):
+def parse_medication_line(line):
     """
-    약봉투 하단의 '약품명 / 1회투약량 / 1일투약횟수 / 투약일수' 표를
-    OCR 텍스트에서 느슨하게 파싱해서 여러 개의 약 정보를 뽑아낸다.
-    - GPT가 medications에 첫 번째 약만 넣어주는 경우 보정용.
-    - 이름과 숫자 사이 공백이 조금 이상해도 최대한 잡아내도록 처리.
+    영수증 표의 한 줄을 가능한 한 '약 1개'로 해석한다.
+    - 숫자가 없어도 이름만 있으면 약으로 취급
+    - 숫자가 여러 개 있으면 마지막 두 개를 (1일 복용횟수, 복용일수)로 가정
+    """
+    line = line.strip()
+    if not line:
+        return None
+    # 거의 숫자/원/콤마만 있으면 건너뛰기
+    if re.fullmatch(r'[\d\s,\.원]+', line):
+        return None
+    # 약 이름: 처음으로 "공백 + 숫자"가 등장하기 전까지를 이름으로 사용
+    m = re.search(r'\s+\d+(\s|$)', line)
+    if m:
+        name = line[:m.start()].strip()
+    else:
+        name = line.strip()
+    # 맨 끝의 숫자 두 개를 dosage/days로 사용 (없으면 None)
+    nums = re.findall(r'\d+', line)
+    dosage = days = None
+    if len(nums) >= 2:
+        dosage = safe_int(nums[-2], None)
+        days = safe_int(nums[-1], None)
+    # 이름 후처리: 뒤에 붙은 "250mg", "500ML" 같은 건 잘라냄
+    name = re.sub(r'\s*\d+\s*(mg|MG|ml|ML)\b.*$', '', name).strip()
+    if not name:
+        return None
+    return {
+        "name": name,
+        "dosage": dosage,
+        "days": days,
+        "before_meal": None,
+        "times": []
+    }
+
+def extract_table_medications(raw_text):
+    """
+    약봉투 영수증 하단 표(약품명 / 투약량 / 횟수 / 일수)를
+    최대한 느슨하게 파싱해서 약 목록을 뽑아낸다.
+    - 숫자가 없어도 이름만 있으면 약으로 취급
+    - 사업자명/금액/성명/주소/유효기간 같은 건 강하게 제외
     """
     meds = []
     if not raw_text:
         return meds
-    # 줄 단위로 정리 (연속 공백을 하나로 축소)
-    lines = [re.sub(r'\s+', ' ', l.strip()) for l in raw_text.splitlines()]
-    header_seen = False
-    for line in lines:
+    lines = [l.strip() for l in raw_text.splitlines()]
+    # 1) 헤더 줄(약품명, 투약량, 횟수, 일수 등)을 찾는다. 못 찾으면 전체 텍스트를 대상으로.
+    header_idx = None
+    for i, line in enumerate(lines):
+        if ('약품' in line or '약 품' in line) and any(k in line for k in ['횟수', '일수', '투약', '투약량']):
+            header_idx = i + 1
+            break
+    if header_idx is None:
+        header_idx = 0
+    # 2) 명백히 약이 아닌 줄은 제외
+    skip_keywords = [
+        '사업자', '등록번호', '요양기관', '성명', '환자', '연락처', '전화', 'TEL',
+        '주소', '대구광역시', '광역시', '구 ', '동 ', '합계', '총 수 납', '총수납',
+        '요양급여', '본인부담', '영수증', '카드', '현금', '처방전', '조제', '조제료',
+        '사용상', '주의사항', '주의 하세요', '보험', '발행일', '금액', '총액',
+        '유효기간', '유효 사용기간', '유효사용기간', '유효 사용 기한', '주사액'
+    ]
+    for line in lines[header_idx:]:
         if not line:
             continue
-        # 1) 헤더 줄 찾기
-        if not header_seen:
-            if '약품명' in line and ('1일' in line or '투약' in line):
-                header_seen = True
-            continue
-        # 2) 표가 끝나는 부분(유효기간 등)이 나오면 종료
-        if '유효' in line or '사용기간' in line:
+        # 유효기간/주의사항이 나오면 표가 끝났다고 보고 탈출
+        if any(k in line for k in ['유효기간', '유효사용기간', '유효 사용기간', '사용상 주의사항']):
             break
-        # 한글이 하나도 없으면 약 행이 아닐 확률이 큼
-        if not re.search(r'[가-힣]', line):
+        if any(k in line for k in skip_keywords):
             continue
-        # 줄 안의 숫자들
-        nums = re.findall(r'\d+', line)
-        # 1회투약량 / 1일투약횟수 / 투약일수 → 최소 3개
-        if len(nums) < 3:
+        parsed = parse_medication_line(line)
+        if not parsed:
             continue
-        # 이름은 "첫 번째 숫자 나오기 전까지"라고 가정
-        name_part = re.split(r'\d', line, 1)[0].strip()
-        if not name_part:
-            continue
-        # 맨 뒤 두 숫자를  "1일 투약횟수 / 투약일수" 라고 간주
-        dosage = safe_int(nums[-2], None)
-        days = safe_int(nums[-1], None)
-        meds.append({
-            "name": name_part,
-            "dosage": dosage,
-            "days": days,
-            "before_meal": None,
-            "times": []
-        })
-    print(f"[DEBUG] extract_table_medications 결과: {len(meds)}개")
-    for m in meds:
-        print("   -", m)
+        meds.append(parsed)
     return meds
 
 def generate_descriptions_for_names(medication_names):
@@ -180,11 +199,11 @@ def generate_descriptions_for_names(medication_names):
                 "content": prompt
             }
         ],
-        temperature=0.0,
+        temperature=0.0,  # 항상 같은 입력이면 같은 출력
         max_tokens=200
     )
     description = response.choices[0].message.content
-    # convert 엔드포인트와 동일하게 후처리
+    # 후처리: 마크다운/단위 제거 + 공백 정리
     description = description.replace('**', '').replace('*', '').replace('_', '')
     description = re.sub(r'\s*\d+\s*(mg|ml|정|알|MG|ML)\s*', '', description, flags=re.IGNORECASE)
     description = re.sub(r'[ \t]+', ' ', description)
@@ -203,7 +222,7 @@ def chat():
     GPT API를 사용한 챗봇 응답
     """
     if not client:
-        return jsonify({'error': 'OPENAI_API_KEY가 설정되지 않았습니다.'}), 500
+        return jsonify({'error': 'OpenAI API 키가 설정되지 않았습니다. 환경변수 OPENAI_API_KEY를 설정해주세요.'}), 500
     
     try:
         data = request.json
@@ -246,7 +265,7 @@ def chat():
         })
         
     except Exception as e:
-        print(f"[ERROR] 챗봇 오류: {str(e)}")
+        print(f"챗봇 오류: {str(e)}")
         return jsonify({'error': f'챗봇 응답 생성 중 오류가 발생했습니다: {str(e)}'}), 500
 
 
@@ -259,7 +278,7 @@ def ocr():
     - 여러 약이 있으면 medications 배열에 여러 개 등록
     """
     if not client:
-        return jsonify({'error': 'OPENAI_API_KEY가 설정되지 않았습니다.'}), 500
+        return jsonify({'error': 'OpenAI API 키가 설정되지 않았습니다. 환경변수 OPENAI_API_KEY를 설정해주세요.'}), 500
     
     try:
         data = request.json
@@ -310,7 +329,6 @@ def ocr():
         if ocr_text.startswith("```"):
             ocr_text = re.sub(r'^```(?:[a-zA-Z]+)?', '', ocr_text).strip()
             ocr_text = re.sub(r'```$', '', ocr_text).strip()
-        print("[DEBUG] OCR 텍스트 일부:\n", ocr_text[:300])
         # ------------ 2단계: 텍스트 → 약 정보 JSON 추출 ------------
         extract_system = (
             "당신은 한국 약봉투 인식 및 정보 추출 전문가입니다.\n"
@@ -381,16 +399,13 @@ def ocr():
         if json_text.startswith("```"):
             json_text = re.sub(r'^```(?:json)?', '', json_text, flags=re.IGNORECASE).strip()
             json_text = re.sub(r'```$', '', json_text).strip()
-        # JSON 파싱
+        # JSON 파싱: 실패해도 그대로 진행 (표 직접 파싱으로 복구)
+        medication_info = {}
         try:
             medication_info = json.loads(json_text)
         except Exception as e:
-            print("[OCR] JSON 파싱 실패:", e)
-            print("[OCR] 원본 JSON 텍스트:", json_text[:500])
-            return jsonify({
-                "success": False,
-                "error": "약 정보를 JSON으로 파싱하는 데 실패했습니다. 다시 시도해주세요."
-            }), 400
+            print("[OCR] JSON 파싱 실패, 표 직접 파싱만 사용합니다:", e)
+            print("[OCR] 원본 JSON 텍스트 일부:", json_text[:500])
 
         # medications 배열이 있으면 그걸 사용, 없으면 단일 객체로 처리
         medications_raw = []
@@ -401,7 +416,8 @@ def ocr():
         else:
             medications_raw = []
 
-        # 하단 표를 직접 파싱해서 보정
+        # LLM이 표의 첫 행만 뽑아오는 경우 보정:
+        # raw_text에 있는 "약품명 / 투약량 / 횟수 / 일수" 표를 한 번 더 직접 파싱해서 합침
         if isinstance(medication_info, dict):
             raw_text_for_table = medication_info.get("raw_text", "") or ocr_text
         else:
@@ -419,7 +435,7 @@ def ocr():
                     if n and n not in existing_names:
                         medications_raw.append(tm)
 
-        print(f"[DEBUG] 최종 medications_raw 개수: {len(medications_raw)}")
+        # ------------ 3단계: 정제해서 서버 메모리에 저장 ------------
 
         saved_meds = []
 
@@ -427,26 +443,26 @@ def ocr():
             if not isinstance(raw_med, dict):
                 continue
 
-            # 약 이름에서 용량 정보 제거
-            name = raw_med.get("name", "")
-            if name:
-                name = re.sub(
-                    r'\s+\d+\s*(?:mg|ml|정|알|MG|ML)\b.*$',
-                    '',
-                    name,
-                    flags=re.IGNORECASE
-                ).strip()
-
-            # 이름이 완전 비어 있으면 스킵
-            if not name or len(name.strip()) == 0:
+            # 약 이름
+            name = (raw_med.get("name") or "").strip()
+            if not name:
                 continue
 
             # dosage와 days를 안전하게 정수로 변환 (없으면 기본값 사용)
-            raw_dosage = raw_med.get("dosage", medication_info.get("dosage", 1) if isinstance(medication_info, dict) else 1)
-            dosage_value = safe_int(raw_dosage, 1)
+            if isinstance(medication_info, dict):
+                base_dosage = medication_info.get("dosage")
+                base_days = medication_info.get("days")
+                fallback_dosage = safe_int(base_dosage, 3)
+                fallback_days = safe_int(base_days, 3)
+            else:
+                fallback_dosage = 3
+                fallback_days = 3
 
-            raw_days = raw_med.get("days", medication_info.get("days", 7) if isinstance(medication_info, dict) else 7)
-            days_value = safe_int(raw_days, 7)
+            raw_dosage = raw_med.get("dosage", fallback_dosage)
+            dosage_value = safe_int(raw_dosage, fallback_dosage)
+
+            raw_days = raw_med.get("days", fallback_days)
+            days_value = safe_int(raw_days, fallback_days)
 
             # 1일 복용 횟수(dosage)에 따라 복용 시간대(times) 자동 설정
             if dosage_value >= 3:
@@ -483,7 +499,7 @@ def ocr():
                     "minute": notification_time.minute
                 }
 
-            # 약 정보 저장
+            # 약 정보 저장 (서버 메모리용)
             medication_id = len(medications_db) + 1
             medication_data = {
                 "id": medication_id,
@@ -494,8 +510,7 @@ def ocr():
                 "times": times_list,
                 "notification_times": notification_times,
                 "registered_date": datetime.now().isoformat(),
-                "image_base64": image_base64,
-                "description": ""  # 나중에 채움
+                "image_base64": image_base64  # 서버 안에서만 보관
             }
 
             medications_db.append(medication_data)
@@ -518,35 +533,56 @@ def ocr():
                 'error': '약 정보를 추출할 수 없습니다. 다시 시도해주세요.'
             }), 400
 
+        # localStorage 용량 폭발 방지용: image_base64는 응답에서 제거
+        public_meds = []
+        for med in saved_meds:
+            med_copy = dict(med)
+            med_copy["image_base64"] = ""
+            public_meds.append(med_copy)
+
         # 기존 호환성: 첫 번째 약은 medication 키로도 내려줌
         return jsonify({
             'success': True,
-            'medication': saved_meds[0],
-            'medications': saved_meds
+            'medication': public_meds[0],
+            'medications': public_meds
         })
         
     except Exception as e:
-        print(f"[ERROR] OCR 전체 파이프라인 오류: {str(e)}")
+        print(f"OCR 전체 파이프라인 오류: {str(e)}")
         return jsonify({'error': f'이미지 분석 중 오류가 발생했습니다: {str(e)}'}), 500
 
 
 @app.route('/api/medications', methods=['GET'])
 def get_medications():
-    return jsonify({'medications': medications_db})
+    """등록된 약 목록 조회"""
+    # image_base64는 응답에서 제거해서 localStorage 용량 문제 방지
+    public_meds = []
+    for med in medications_db:
+        med_copy = dict(med)
+        med_copy["image_base64"] = ""
+        public_meds.append(med_copy)
+    return jsonify({
+        'medications': public_meds
+    })
 
 
 @app.route('/api/medications', methods=['POST'])
 def create_medication():
-    """프론트에서 수동 등록 시 사용"""
+    """약 정보 저장 (프론트엔드에서 동기화용)"""
     try:
         data = request.json
         medication_id = len(medications_db) + 1
         
+        dosage_raw = data.get("dosage", 1)
+        days_raw = data.get("days", 7)
+        dosage_val = safe_int(dosage_raw, 1)
+        days_val = safe_int(days_raw, 7)
+        
         medication_data = {
             "id": medication_id,
             "name": data.get("name", "알 수 없음"),
-            "dosage": data.get("dosage", 1),
-            "days": data.get("days", 7),
+            "dosage": dosage_val,
+            "days": days_val,
             "before_meal": data.get("before_meal", False),
             "times": data.get("times", ["아침"]),
             "notification_times": data.get("notification_times", {}),
@@ -567,25 +603,23 @@ def create_medication():
 
 @app.route('/api/medications/<int:medication_id>', methods=['GET'])
 def get_medication(medication_id):
+    """특정 약 정보 조회"""
     medication = next((m for m in medications_db if m['id'] == medication_id), None)
     if not medication:
         return jsonify({'error': '약을 찾을 수 없습니다.'}), 404
-    return jsonify(medication)
+    med_copy = dict(medication)
+    med_copy["image_base64"] = ""  # 여기서도 응답에는 이미지 제거
+    return jsonify(med_copy)
 
 
 @app.route('/api/medications/convert', methods=['POST'])
 def convert_medication_description():
     """
     약 정보를 노인 친화적인 설명으로 변환 (간단하게, 여러 약 지원)
-    동작 방식:
-    1) 먼저 medications_db에서 같은 이름(정규화된 이름)의 약을 찾아,
-       description이 있으면 그대로 사용
-    2) 없는 이름에 대해서만 generate_descriptions_for_names() 한 번 호출
-       → DB에도 description을 저장해 둠
-    → 같은 약 이름이면 언제 불러도 항상 같은 설명이 나오도록 보장
+    같은 입력(names 목록)이면 항상 같은 결과가 나오도록 temperature=0.0 사용
     """
     if not client:
-        return jsonify({'error': 'OPENAI_API_KEY가 설정되지 않았습니다.'}), 500
+        return jsonify({'error': 'OpenAI API 키가 설정되지 않았습니다. 환경변수 OPENAI_API_KEY를 설정해주세요.'}), 500
     
     try:
         data = request.json
@@ -595,47 +629,16 @@ def convert_medication_description():
         if not medication_names or len(medication_names) == 0:
             return jsonify({'error': '약 이름이 필요합니다.'}), 400
         
-        descriptions = []
-        missing_names = []
-        
-        # 1) DB에서 기존 description 찾기
-        for name in medication_names:
-            norm_target = normalize_name(name)
-            matched_med = next(
-                (m for m in medications_db
-                 if normalize_name(m.get('name', '')) == norm_target),
-                None
-            )
-            if matched_med and matched_med.get('description'):
-                descriptions.append(matched_med['description'])
-            else:
-                descriptions.append(None)
-                missing_names.append(name)
-        
-        # 2) description이 없는 약들만 GPT로 생성
-        if missing_names:
-            new_descs = generate_descriptions_for_names(missing_names)
-            idx = 0
-            for i, name in enumerate(medication_names):
-                if descriptions[i] is None:
-                    desc = new_descs[idx]
-                    idx += 1
-                    descriptions[i] = desc
-                    # DB에 동일 이름 약 있으면 description 저장
-                    norm_target = normalize_name(name)
-                    for m in medications_db:
-                        if normalize_name(m.get('name', '')) == norm_target:
-                            m['description'] = desc
-        
-        description_text = "\n".join(descriptions)
+        desc_list = generate_descriptions_for_names(medication_names)
+        description = "\n".join(desc_list)
         
         return jsonify({
-            'description': description_text,
+            'description': description,
             'time': time_of_day
         })
         
     except Exception as e:
-        print(f"[ERROR] 약 설명 변환 오류: {str(e)}")
+        print(f"약 설명 변환 오류: {str(e)}")
         return jsonify({'error': f'약 설명 변환 중 오류가 발생했습니다: {str(e)}'}), 500
 
 
@@ -646,10 +649,13 @@ def get_today_medications():
     today_medications = []
     
     for med in medications_db:
+        days_value = safe_int(med.get('days'), 0)
+        if days_value <= 0:
+            continue
         registered_date = datetime.fromisoformat(med['registered_date']).date()
         days_diff = (today - registered_date).days
         
-        if 0 <= days_diff < med['days']:
+        if 0 <= days_diff < days_value:
             for time in med['times']:
                 today_medications.append({
                     'id': med['id'],
@@ -716,7 +722,7 @@ def complete_medication():
         })
         
     except Exception as e:
-        print(f"[ERROR] 복용 기록 오류: {str(e)}")
+        print(f"복용 기록 오류: {str(e)}")
         return jsonify({'error': f'복용 기록 저장 중 오류가 발생했습니다: {str(e)}'}), 500
 
 
@@ -739,11 +745,7 @@ def get_history():
 
 @app.route('/api/history/month', methods=['GET'])
 def get_month_history():
-    """
-    이달의 복용 내역 조회 + 날짜별 O/X 상태
-    - 아침/점심/저녁까지 모두 고려
-    - '저녁' 버튼을 한 번이라도 누른 날만 O/X 평가
-    """
+    """이달의 복용 내역 조회 + 날짜별 O/X 상태"""
     year = request.args.get('year', datetime.now().year)
     month = request.args.get('month', datetime.now().month)
     year = int(year)
@@ -772,25 +774,36 @@ def get_month_history():
     current = start_date
     while current < next_month_date:
         date_str = current.isoformat()
-        required_pairs = set()
+        # 1) 이 날짜에 "원래 먹어야 하는" 약들(약 + 시간대) 계산
+        required_pairs = set()  # (med_id, time) 쌍
         for med in medications_db:
+            days_value = safe_int(med.get('days'), 0)
+            if days_value <= 0:
+                continue
             registered_date = datetime.fromisoformat(med['registered_date']).date()
             days_diff = (current - registered_date).days
-            if 0 <= days_diff < med['days']:
+            if 0 <= days_diff < days_value:
                 for t in med.get('times', []):
                     required_pairs.add((med['id'], t))
+        # 먹어야 할 약이 하나도 없는 날 → 상태 아예 기록하지 않음
         if not required_pairs:
             current += timedelta(days=1)
             continue
+        # 2) 이 날짜의 실제 복용 기록들
         day_records = [r for r in medication_history_db if r['date'] == date_str]
+        # 3) 저녁 버튼을 한 번이라도 누른 날만 O/X 평가
         has_evening_action = any(r['time'] == '저녁' for r in day_records)
         if not has_evening_action:
             current += timedelta(days=1)
             continue
+        # 4) 실제로 먹은 (med_id, time) 쌍
         taken_pairs = {(r['medication_id'], r['time']) for r in day_records}
+        # 5) 모든 (med_id, time)이 완료되었는지 체크
         all_taken = required_pairs.issubset(taken_pairs)
         daily_status[date_str] = 'O' if all_taken else 'X'
         current += timedelta(days=1)
+    
+    # -------- O / X 계산 끝 --------
     
     return jsonify({
         'history': daily_history,
@@ -810,6 +823,7 @@ def get_users():
 
 @app.route('/api/users', methods=['POST'])
 def create_user():
+    """사용자 정보 저장 (로그인/회원가입 시)"""
     try:
         data = request.json
         user_id = len(users_db) + 1
