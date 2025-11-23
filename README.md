@@ -210,7 +210,8 @@ C타입 복지의 사각지대에 놓인 사람들 위한 서비스
 
 ## GitHub 레포지토리
 - [medicine_helper GitHub Repository](https://github.com/skeltx44/medicine_helper)
-- [medicine_helper GitHub Repository](https://github.com/skeltx44/webapp)
+### 앱 구현
+- [webapp GitHub Repository](https://github.com/skeltx44/webapp)
 
 ## 앱 배포
 - (배포 URL이 정해지면 여기에 추가)
