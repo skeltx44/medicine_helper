@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from openai import OpenAI
+import re
 
 # .env 파일에서 환경변수 로드 (로컬 개발용)
 # Render 등 클라우드 배포 시에는 환경변수를 직접 설정하면 됩니다
@@ -41,6 +42,29 @@ users_db = []
 UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+
+
+def safe_int(value, default):
+    """
+    문자열 "1일 3회", "3회", "7일분" 등에서 숫자만 뽑아서 int로 변환.
+    실패하면 default 반환.
+    """
+    try:
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            if value.is_integer():
+                return int(value)
+            return int(round(value))
+        if isinstance(value, str):
+            m = re.search(r'\d+', value)
+            if m:
+                return int(m.group())
+        return default
+    except Exception:
+        return default
 
 
 @app.route('/api/chat', methods=['POST'])
@@ -84,7 +108,6 @@ def chat():
         
         bot_response = response.choices[0].message.content
         # 마크다운 문법 제거 및 줄바꿈 정리
-        import re
         bot_response = bot_response.replace('**', '').replace('*', '').replace('_', '')
         bot_response = re.sub(r'\n{3,}', '\n\n', bot_response)
         
@@ -102,6 +125,7 @@ def ocr():
     """
     약봉지 이미지 OCR 처리 및 약 정보 추출
     Vision API 사용
+    - 여러 약이 있으면 medications 배열로 여러 개 등록
     """
     if not client:
         return jsonify({'error': 'OpenAI API 키가 설정되지 않았습니다. 환경변수 OPENAI_API_KEY를 설정해주세요.'}), 500
@@ -125,7 +149,7 @@ def ocr():
                     "role": "system",
                     "content": (
                         "당신은 한국 약봉투 이미지를 분석하는 전문가입니다.\n"
-                        "이미지에서 다음 정보를 JSON 형식으로 정확하게 추출해주세요.\n"
+                        "이미지에서 다음 정보를 JSON 형식으로 매우 신중하게, 정확하게 추출해주세요.\n"
                         "반드시 아래 스키마와 키 이름을 그대로 사용하고, "
                         "JSON 외의 다른 설명 텍스트는 절대 출력하지 마세요.\n\n"
                         "{\n"
@@ -133,16 +157,31 @@ def ocr():
                         "  \"dosage\": 1일 복용 횟수(정수, 예: 3),\n"
                         "  \"days\": 총 복용 일수(정수, 예: 7),\n"
                         "  \"before_meal\": true 또는 false,\n"
-                        "  \"times\": [\"아침\", \"점심\", \"저녁\"] 중 일부를 요소로 갖는 배열\n"
+                        "  \"times\": [\"아침\", \"점심\", \"저녁\"] 중 일부를 요소로 갖는 배열,\n"
+                        "  \"medications\": [\n"
+                        "    {\n"
+                        "      \"name\": \"약 이름 문자열\",\n"
+                        "      \"dosage\": 1일 복용 횟수(정수),\n"
+                        "      \"days\": 총 복용 일수(정수),\n"
+                        "      \"before_meal\": true 또는 false,\n"
+                        "      \"times\": [\"아침\", \"점심\", \"저녁\"] 중 일부\n"
+                        "    }\n"
+                        "  ]\n"
                         "}\n\n"
                         "위 스키마의 name, dosage, days, before_meal, times 키는 "
-                        "반드시 최상위에 한 번씩 포함해야 합니다.\n\n"
+                        "최상위에 한 번씩 포함하고, 여러 약이 있을 경우 medications 배열에도 각 약 정보를 넣어주세요.\n\n"
+                        "중요: 약봉투에 다음과 같이 적힌 경우 숫자를 정확히 해석해야 합니다.\n"
+                        "- \"1일 1회\", \"하루 1번\" 등은 모두 dosage: 1 로 설정합니다.\n"
+                        "- \"1일 2회\" 는 dosage: 2 로 설정합니다.\n"
+                        "- \"1일 3회\" 는 dosage: 3 으로 설정합니다.\n"
+                        "days도 \"3일분\", \"7일분\" 처럼 적힌 경우 안의 숫자만 사용해 정수로 설정합니다.\n\n"
                         "추가 규칙:\n"
                         "- 약봉투에 서로 다른 약이 여러 개 적혀 있다면, 각 약을 medications 배열의 별도 원소로 넣으세요.\n"
                         "- 정보가 애매하거나 잘 안 보이면 절대 추측하지 말고 해당 필드는 null로 두세요.\n"
                         "  - 예시: 복용 횟수가 잘 보이지 않으면 dosage는 null로 두세요.\n"
                         "  - 예시: 복용 일수가 안 보이면 days는 null로 두세요.\n"
-                        "- \"dosage\"와 \"days\"는 반드시 정수로 추출하세요. \"3회\", \"3일분\"처럼 적혀 있어도 숫자 3만 남기세요.\n"
+                        "- \"dosage\"와 \"days\"는 반드시 정수(또는 정수로 해석 가능한 값)로 추출하세요. "
+                        "\"3회\", \"3일분\"처럼 적혀 있어도 숫자 3만 남기세요.\n"
                         "- 약 이름이 명확히 안 보이면 name은 null로 두세요.\n"
                         "- 아무 약도 확실하게 읽을 수 없다면 medications는 빈 배열 []로 두세요.\n\n"
                         "주의:\n"
@@ -150,9 +189,10 @@ def ocr():
                         "- 위 스키마의 최상위 필드(name, dosage, days, before_meal, times)는 "
                         "medications 배열과 별개로 반드시 포함해야 합니다.\n"
                         "- before_meal 값은 특별한 경우가 아니라면 false로 설정해도 됩니다.\n"
-                        "- times 값은 null, 빈 배열, 또는 [\"아침\", \"점심\", \"저녁\"] 등으로 적어도 됩니다. "
+                        "- times 값은 null, 빈 배열, 또는 [\"아침\"], [\"점심\"], [\"저녁\"] 등으로 적어도 됩니다. "
                         "서버에서 dosage 값을 기준으로 실제 복용 시간대를 계산합니다.\n"
-                        "- JSON 바깥에 다른 문장이나 설명을 절대 쓰지 말고, 오직 하나의 JSON 객체만 출력하세요."
+                        "- JSON 바깥에 다른 문장이나 설명을 절대 쓰지 말고, 오직 하나의 JSON 객체만 출력하세요.\n"
+                        "- 답변을 출력하기 전에, 숫자(dosage, days)가 약봉투 내용과 일치하는지 한 번 더 천천히 검토한 뒤에 최종 JSON을 반환하세요."
                     )
                 },
                 {
@@ -171,110 +211,133 @@ def ocr():
                     ]
                 }
             ],
-            max_tokens=500
+            temperature=0.1,
+            max_tokens=700
         )
         
         # 응답 파싱
-        response_text = response.choices[0].message.content
-        
-        # JSON 추출 (코드 블록이 있을 수 있음)
-        import re
-        json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
-        if json_match:
-            medication_info = json.loads(json_match.group())
+        response_text = response.choices[0].message.content.strip()
+
+        # 코드블록 제거 시도
+        cleaned = response_text
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r'^```(?:json)?', '', cleaned, flags=re.IGNORECASE).strip()
+            cleaned = re.sub(r'```$', '', cleaned).strip()
+
+        medication_info = {}
+        try:
+            medication_info = json.loads(cleaned)
+        except Exception:
+            # 실패하면 예전 방식으로 백업: 첫 번째 {} 블록만 파싱
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                try:
+                    medication_info = json.loads(json_match.group())
+                except Exception:
+                    medication_info = {}
+            else:
+                medication_info = {}
+
+        # medications 배열이 있으면 그걸 사용, 없으면 단일 객체로 처리
+        medications_raw = []
+        if isinstance(medication_info, dict) and isinstance(medication_info.get("medications"), list) and len(medication_info["medications"]) > 0:
+            medications_raw = medication_info["medications"]
+        elif isinstance(medication_info, dict) and medication_info:
+            medications_raw = [medication_info]
         else:
-            # JSON이 없으면 기본값 사용
-            medication_info = {
-                "name": "",
-                "dosage": 1,
-                "days": 7,
-                "before_meal": False,
-                "times": ["아침"]
+            medications_raw = []
+
+        saved_meds = []
+
+        for raw_med in medications_raw:
+            if not isinstance(raw_med, dict):
+                continue
+
+            # 약 이름에서 용량 정보 제거
+            name = raw_med.get("name", "")
+            if name:
+                name = re.sub(
+                    r'\s+\d+[mg|ml|정|알|MG|ML].*$',
+                    '',
+                    name,
+                    flags=re.IGNORECASE
+                ).strip()
+
+            # 이름이 비어있거나 너무 짧으면 스킵
+            if not name or len(name) < 2:
+                continue
+
+            # dosage와 days를 안전하게 정수로 변환
+            raw_dosage = raw_med.get("dosage", medication_info.get("dosage", 1))
+            dosage_value = safe_int(raw_dosage, 1)
+
+            raw_days = raw_med.get("days", medication_info.get("days", 7))
+            days_value = safe_int(raw_days, 7)
+
+            # 1일 복용 횟수(dosage)에 따라 복용 시간대(times) 자동 설정
+            if dosage_value >= 3:
+                times_list = ["아침", "점심", "저녁"]
+            elif dosage_value == 2:
+                times_list = ["아침", "저녁"]
+            else:  # 1회 또는 그 외
+                times_list = ["저녁"]
+
+            # 식후로 통일
+            before_meal = False
+
+            # 식사 시간 정의 (기본값)
+            meal_times = {
+                "아침": {"hour": 8, "minute": 0},
+                "점심": {"hour": 12, "minute": 0},
+                "저녁": {"hour": 18, "minute": 0}
             }
-        
-        # 약 이름에서 용량 정보 제거
-        if medication_info.get("name"):
-            medication_info["name"] = re.sub(
-                r'\s+\d+[mg|ml|정|알|MG|ML].*$',
-                '',
-                medication_info["name"],
-                flags=re.IGNORECASE
-            ).strip()
-        
-        # 약 이름이 비어있거나 너무 짧으면 저장하지 않음
-        if not medication_info.get("name") or len(medication_info.get("name", "")) < 2:
+
+            # 알림 시간 계산 (식후 30분 후로 통일)
+            notification_times = {}
+            now = datetime.now()
+            for time_label in times_list:
+                meal_time = meal_times.get(time_label, meal_times["저녁"])
+                notification_time = now.replace(
+                    hour=meal_time["hour"],
+                    minute=meal_time["minute"],
+                    second=0,
+                    microsecond=0
+                ) + timedelta(minutes=30)
+                
+                notification_times[time_label] = {
+                    "hour": notification_time.hour,
+                    "minute": notification_time.minute
+                }
+
+            # 약 정보 저장
+            medication_id = len(medications_db) + 1
+            medication_data = {
+                "id": medication_id,
+                "name": name,
+                "dosage": dosage_value,
+                "days": days_value,
+                "before_meal": before_meal,
+                "times": times_list,
+                "notification_times": notification_times,
+                "registered_date": datetime.now().isoformat(),
+                "image_base64": image_base64
+            }
+
+            medications_db.append(medication_data)
+            saved_meds.append(medication_data)
+
+        # 아무 약도 저장 못 했으면 에러
+        if not saved_meds:
             return jsonify({
                 'success': False,
                 'error': '약 정보를 추출할 수 없습니다. 다시 시도해주세요.'
             }), 400
-        
-        # dosage와 days를 안전하게 정수로 변환
-        raw_dosage = medication_info.get("dosage", 1)
-        try:
-            dosage_value = int(raw_dosage)
-        except (TypeError, ValueError):
-            dosage_value = 1
-        
-        raw_days = medication_info.get("days", 7)
-        try:
-            days_value = int(raw_days)
-        except (TypeError, ValueError):
-            days_value = 7
-        
-        # 1일 복용 횟수(dosage)에 따라 복용 시간대(times) 자동 설정
-        if dosage_value >= 3:
-            times_list = ["아침", "점심", "저녁"]
-        elif dosage_value == 2:
-            times_list = ["아침", "저녁"]
-        else:  # 1회 또는 그 외
-            times_list = ["저녁"]
-        
-        # 식후로 통일
-        before_meal = False
-        
-        # 식사 시간 정의 (기본값)
-        meal_times = {
-            "아침": {"hour": 8, "minute": 0},
-            "점심": {"hour": 12, "minute": 0},
-            "저녁": {"hour": 18, "minute": 0}
-        }
-        
-        # 알림 시간 계산 (식후 30분 후로 통일)
-        notification_times = {}
-        now = datetime.now()
-        for time_label in times_list:
-            meal_time = meal_times.get(time_label, meal_times["저녁"])
-            notification_time = now.replace(
-                hour=meal_time["hour"],
-                minute=meal_time["minute"],
-                second=0,
-                microsecond=0
-            ) + timedelta(minutes=30)
-            
-            notification_times[time_label] = {
-                "hour": notification_time.hour,
-                "minute": notification_time.minute
-            }
-        
-        # 약 정보 저장
-        medication_id = len(medications_db) + 1
-        medication_data = {
-            "id": medication_id,
-            "name": medication_info.get("name", ""),
-            "dosage": dosage_value,
-            "days": days_value,
-            "before_meal": before_meal,
-            "times": times_list,
-            "notification_times": notification_times,
-            "registered_date": datetime.now().isoformat(),
-            "image_base64": image_base64
-        }
-        
-        medications_db.append(medication_data)
-        
+
+        # 기존 호환성: 첫 번째 약은 medication 키로도 내려줌
         return jsonify({
             'success': True,
-            'medication': medication_data
+            'medication': saved_meds[0],
+            'medications': saved_meds
         })
         
     except Exception as e:
@@ -401,7 +464,6 @@ def convert_medication_description():
         )
         
         description = response.choices[0].message.content
-        import re
         description = description.replace('**', '').replace('*', '').replace('_', '')
         description = re.sub(r'\s*\d+\s*(mg|ml|정|알|MG|ML)\s*', '', description, flags=re.IGNORECASE)
         description = re.sub(r'[ \t]+', ' ', description)
@@ -460,7 +522,6 @@ def complete_medication():
             return jsonify({'error': '약 ID가 필요합니다.'}), 400
 
         # 해당 약 정보 조회 (여기서 이름을 쪼갬)
-        import re
         medication = next((m for m in medications_db if m['id'] == medication_id), None)
         name_parts = []
 
@@ -525,29 +586,72 @@ def get_history():
 
 @app.route('/api/history/month', methods=['GET'])
 def get_month_history():
-    """이달의 복용 내역 조회"""
+    """이달의 복용 내역 조회 + 날짜별 O/X 상태"""
     year = request.args.get('year', datetime.now().year)
     month = request.args.get('month', datetime.now().month)
+    # 문자열일 수도 있으니 int로 변환
+    year = int(year)
+    month = int(month)
     
-    # 해당 월의 모든 기록 필터링
+    # 해당 월의 모든 기록 필터링 (기존 로직 그대로)
     month_history = [
         h for h in medication_history_db
-        if datetime.fromisoformat(h['date']).year == int(year) and
-           datetime.fromisoformat(h['date']).month == int(month)
+        if datetime.fromisoformat(h['date']).year == year and
+           datetime.fromisoformat(h['date']).month == month
     ]
     
-    # 날짜별로 그룹화
+    # 날짜별로 기록 그룹화 (기존 로직)
     daily_history = {}
     for record in month_history:
-        date = record['date']
-        if date not in daily_history:
-            daily_history[date] = []
-        daily_history[date].append(record)
+        date_str = record['date']
+        if date_str not in daily_history:
+            daily_history[date_str] = []
+        daily_history[date_str].append(record)
+    # -------- O / X 계산 (아침/점심/저녁까지 모두 고려) --------
+    start_date = datetime(year, month, 1).date()
+    if month == 12:
+        next_month_date = datetime(year + 1, 1, 1).date()
+    else:
+        next_month_date = datetime(year, month + 1, 1).date()
     
+    daily_status = {}  # 예: {'2025-11-03': 'O', '2025-11-04': 'X', ...}
+    current = start_date
+    while current < next_month_date:
+        date_str = current.isoformat()
+        # 1) 이 날짜에 "원래 먹어야 하는" 약들(약 + 시간대) 계산
+        required_pairs = set()  # (med_id, time) 쌍
+        required_meds_for_day = []
+        for med in medications_db:
+            registered_date = datetime.fromisoformat(med['registered_date']).date()
+            days_diff = (current - registered_date).days
+            if 0 <= days_diff < med['days']:
+                required_meds_for_day.append(med)
+                for t in med.get('times', []):
+                    required_pairs.add((med['id'], t))
+        # 먹어야 할 약이 하나도 없는 날 → 상태 아예 기록하지 않음 (프론트에서 표시 X)
+        if not required_pairs:
+            current += timedelta(days=1)
+            continue
+        # 2) 이 날짜의 실제 복용 기록들
+        day_records = [r for r in medication_history_db if r['date'] == date_str]
+        # 3) 저녁 버튼을 한 번이라도 누른 날만 O/X 평가
+        has_evening_action = any(r['time'] == '저녁' for r in day_records)
+        if not has_evening_action:
+            # 아직 저녁 완료를 안 눌렀으면 이 날은 표시하지 않음
+            current += timedelta(days=1)
+            continue
+        # 4) 실제로 먹은 (med_id, time) 쌍
+        taken_pairs = {(r['medication_id'], r['time']) for r in day_records}
+        # 5) 모든 (med_id, time)이 완료되었는지 체크
+        all_taken = required_pairs.issubset(taken_pairs)
+        daily_status[date_str] = 'O' if all_taken else 'X'
+        current += timedelta(days=1)
+    # -------- O / X 계산 끝 --------
     return jsonify({
         'history': daily_history,
         'year': year,
-        'month': month
+        'month': month,
+        'daily_status': daily_status  # 달력에서 이걸로 O / X 표시
     })
 
 
