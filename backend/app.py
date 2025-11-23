@@ -66,6 +66,121 @@ def safe_int(value, default):
     except Exception:
         return default
 
+def extract_table_medications(raw_text):
+    """
+    약봉투 영수증 하단 표(약품명 / 1회투약량 / 1일투약횟수 / 투약일수)를
+    직접 파싱해서 약 목록을 뽑아낸다.
+    GPT가 첫 행만 뽑아올 때 보정용.
+    """
+    meds = []
+    if not raw_text:
+        return meds
+    lines = [l.strip() for l in raw_text.splitlines()]
+    header_idx = None
+    # "약품명"이 들어간 헤더 줄 위치 찾기
+    for i, line in enumerate(lines):
+        if '약품명' in line and ('1일' in line or '투약' in line):
+            header_idx = i + 1
+            break
+    if header_idx is None:
+        return meds
+    # 헤더 아래 줄부터가 실제 약 행들
+    for line in lines[header_idx:]:
+        if not line:
+            continue
+        # 표 끝나는 부분에서 탈출 (유효사용기간 등)
+        if '유효' in line or '사용기간' in line:
+            break
+        # 예: "시클러캡슐250mg      1   3   3"
+        m = re.match(r'^([가-힣A-Za-z0-9\s\(\)\-]+?)\s+(\d+)\s+(\d+)\s+(\d+)', line)
+        if not m:
+            continue
+        name = m.group(1).strip()
+        # 2번째 숫자: 1회 투약량(우리는 안 씀)
+        # 3번째 숫자: 1일 투약 횟수
+        # 4번째 숫자: 투약 일수
+        dosage = safe_int(m.group(3), None)
+        days = safe_int(m.group(4), None)
+        meds.append({
+            "name": name,
+            "dosage": dosage,
+            "days": days,
+            "before_meal": None,
+            "times": []
+        })
+    return meds
+
+def generate_descriptions_for_names(medication_names):
+    """
+    약 이름 리스트를 받아서 각 약에 대한 간단한 모양/색 설명을 한 줄씩 생성.
+    - 같은 입력이면 항상 같은 결과가 나오도록 temperature=0.0 사용
+    - 반환값: 약 개수와 동일한 길이의 문자열 리스트
+    """
+    if not client or not medication_names:
+        return [""] * len(medication_names)
+    names_str = ', '.join(medication_names)
+    num_meds = len(medication_names)
+    prompt = f"""
+약 이름들: {names_str}
+약은 총 {num_meds}개입니다.
+
+각 약을 고령층이 이해하기 쉬운 언어로 아주 간단하게 설명해 주세요.
+
+설명 규칙:
+- 약의 색상, 모양, 크기만 설명합니다.
+- 약 이름, 회사 이름, 효능, 복용 시간, 복용 횟수, 용량(mg, ml 등)은 절대 언급하지 않습니다.
+- 실제 색/모양 정보를 알 수 없으면, 일반적인 알약/캡슐의 모양과 색을 상상해서 사용해도 됩니다.
+- 서로 다른 약은 색이나 형태를 조금씩 다르게 해서 구분되도록 해 주세요.
+- "약 정보 없음", "정보 부족", "알 수 없음"과 같은 표현은 절대 사용하지 마세요.
+- 같은 입력(names 목록)이 주어지면 항상 같은 문장을 사용하려고 노력하세요.
+
+형식 규칙(매우 중요):
+- 출력은 여러 줄 텍스트입니다.
+- 한 줄에는 한 가지 약만 설명합니다.
+- 출력 줄 수는 최대 {num_meds}줄입니다. {num_meds}줄보다 적게 써도 괜찮지만, {num_meds}줄보다 많이 쓰면 안 됩니다.
+- 설명하기 어려운 약이 있으면 그 약은 그냥 생략하고, 그 대신 "정보 없음" 같은 문장은 쓰지 마세요.
+- 줄과 줄 사이는 줄바꿈(\\n)으로만 구분합니다.
+- 한 설명 안에는 줄바꿈을 넣지 말고, 한 줄로만 작성하세요.
+- 마크다운 문법(**, *, _, -, 번호 매기기 등)은 절대 사용하지 마세요.
+
+"""
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "당신은 고령층을 위한 약 설명 전문가입니다. "
+                    "약을 색상, 모양, 크기로만 매우 간단하고 짧게 설명해야 합니다. "
+                    "약 이름, 회사명, 효능, 복용 시간, 복용 횟수, 용량(mg, ml 등)은 절대 언급하지 마세요. "
+                    "여러 약이 있을 때도 새로운 약을 만들어 추가하지 말고, "
+                    "입력으로 받은 약들만 설명하세요. "
+                    "설명하기 어려운 약이 있더라도 "
+                    "'약 정보 없음', '정보 부족', '알 수 없음' 같은 문장은 절대 쓰지 마세요. "
+                    "마크다운 문법은 쓰지 마세요."
+                )
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0.0,
+        max_tokens=200
+    )
+    description = response.choices[0].message.content
+    # convert 엔드포인트와 동일하게 후처리
+    description = description.replace('**', '').replace('*', '').replace('_', '')
+    description = re.sub(r'\s*\d+\s*(mg|ml|정|알|MG|ML)\s*', '', description, flags=re.IGNORECASE)
+    description = re.sub(r'[ \t]+', ' ', description)
+    description = re.sub(r'\n{3,}', '\n\n', description)
+    description = description.strip()
+    lines = [line.strip() for line in description.splitlines() if line.strip()]
+    # 약 개수만큼 맞춰서 리턴
+    if len(lines) < len(medication_names):
+        lines += [""] * (len(medication_names) - len(lines))
+    return lines[:len(medication_names)]
+
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
@@ -269,6 +384,25 @@ def ocr():
         else:
             medications_raw = []
 
+        # LLM이 표의 첫 행(시클러캡슐)만 뽑아오는 경우가 많아서,
+        # raw_text에 있는 "약품명 / 1회투약량 / 1일투약횟수 / 투약일수" 표를 한 번 더 직접 파싱해서 보정
+        if isinstance(medication_info, dict):
+            raw_text_for_table = medication_info.get("raw_text", "") or ocr_text
+        else:
+            raw_text_for_table = ocr_text
+        table_meds = extract_table_medications(raw_text_for_table)
+        if table_meds:
+            if len(medications_raw) <= 1:
+                # 한 개만 있으면 표에서 읽은 약 목록으로 통째로 교체
+                medications_raw = table_meds
+            else:
+                # 이미 여러 개 있으면, 표에서 추가로 발견된 약만 합치기
+                existing_names = {(m.get("name") or "").strip() for m in medications_raw}
+                for tm in table_meds:
+                    n = (tm.get("name") or "").strip()
+                    if n and n not in existing_names:
+                        medications_raw.append(tm)
+
         saved_meds = []
 
         for raw_med in medications_raw:
@@ -290,10 +424,10 @@ def ocr():
                 continue
 
             # dosage와 days를 안전하게 정수로 변환 (없으면 기본값 사용)
-            raw_dosage = raw_med.get("dosage", medication_info.get("dosage", 1))
+            raw_dosage = raw_med.get("dosage", medication_info.get("dosage", 1) if isinstance(medication_info, dict) else 1)
             dosage_value = safe_int(raw_dosage, 1)
 
-            raw_days = raw_med.get("days", medication_info.get("days", 7))
+            raw_days = raw_med.get("days", medication_info.get("days", 7) if isinstance(medication_info, dict) else 7)
             days_value = safe_int(raw_days, 7)
 
             # 1일 복용 횟수(dosage)에 따라 복용 시간대(times) 자동 설정
@@ -348,6 +482,16 @@ def ocr():
             medications_db.append(medication_data)
             saved_meds.append(medication_data)
 
+        # 약 설명을 한 번 생성해서 각 약 객체에 저장 (오늘의 약에서 재사용)
+        if saved_meds:
+            try:
+                med_names = [m["name"] for m in saved_meds]
+                desc_list = generate_descriptions_for_names(med_names)
+                for med, desc in zip(saved_meds, desc_list):
+                    med["description"] = desc
+            except Exception as e:
+                print("[OCR] 약 설명 생성 중 오류:", e)
+
         # 아무 약도 저장 못 했으면 에러
         if not saved_meds:
             return jsonify({
@@ -391,7 +535,8 @@ def create_medication():
             "times": data.get("times", ["아침"]),
             "notification_times": data.get("notification_times", {}),
             "registered_date": data.get("registered_date", datetime.now().isoformat()),
-            "image_base64": data.get("image_base64", "")
+            "image_base64": data.get("image_base64", ""),
+            "description": data.get("description", "")
         }
         
         medications_db.append(medication_data)
@@ -430,73 +575,9 @@ def convert_medication_description():
         if not medication_names or len(medication_names) == 0:
             return jsonify({'error': '약 이름이 필요합니다.'}), 400
         
-        names_str = ', '.join(medication_names)
-        num_meds = len(medication_names)
-        
-        prompt = f"""
-약 이름들: {names_str}
-약은 총 {num_meds}개입니다.
-
-각 약을 고령층이 이해하기 쉬운 언어로 아주 간단하게 설명해 주세요.
-
-설명 규칙:
-- 약의 색상, 모양, 크기만 설명합니다.
-- 약 이름, 회사 이름, 효능, 복용 시간, 복용 횟수, 용량(mg, ml 등)은 절대 언급하지 않습니다.
-- 실제 색/모양 정보를 알 수 없으면, 일반적인 알약/캡슐의 모양과 색을 상상해서 사용해도 됩니다.
-- 서로 다른 약은 색이나 형태를 조금씩 다르게 해서 구분되도록 해 주세요.
-- "약 정보 없음", "정보 부족", "알 수 없음"과 같은 표현은 절대 사용하지 마세요.
-- 같은 입력(names 목록)이 주어지면 항상 같은 문장을 사용하려고 노력하세요.
-
-형식 규칙(매우 중요):
-- 출력은 여러 줄 텍스트입니다.
-- 한 줄에는 한 가지 약만 설명합니다.
-- 출력 줄 수는 최대 {num_meds}줄입니다. {num_meds}줄보다 적게 써도 괜찮지만, {num_meds}줄보다 많이 쓰면 안 됩니다.
-- 설명하기 어려운 약이 있으면 그 약은 그냥 생략하고, 그 대신 "정보 없음" 같은 문장은 쓰지 마세요.
-- 줄과 줄 사이는 줄바꿈(\\n)으로만 구분합니다.
-- 한 설명 안에는 줄바꿈을 넣지 말고, 한 줄로만 작성하세요.
-- 마크다운 문법(**, *, _, -, 번호 매기기 등)은 절대 사용하지 마세요.
-
-예시 (약이 3개일 때):
-작은 하얀색 둥근 약 1알
-조금 큰 노란색 타원형 약 1알
-길쭉한 파란색 캡슐 1알
-"""
-        
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "당신은 고령층을 위한 약 설명 전문가입니다. "
-                        "약을 색상, 모양, 크기로만 매우 간단하고 짧게 설명해야 합니다. "
-                        "약 이름, 회사명, 효능, 복용 시간, 복용 횟수, 용량(mg, ml 등)은 절대 언급하지 마세요. "
-                        "여러 약이 있을 때도 새로운 약을 만들어 추가하지 말고, "
-                        "입력으로 받은 약들만 설명하세요. "
-                        "설명하기 어려운 약이 있더라도 "
-                        "'약 정보 없음', '정보 부족', '알 수 없음' 같은 문장은 절대 쓰지 마세요. "
-                        "마크다운 문법은 쓰지 마세요."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=0.0,  # 항상 같은 결과가 나오도록
-            max_tokens=200
-        )
-        
-        description = response.choices[0].message.content
-        description = description.replace('**', '').replace('*', '').replace('_', '')
-        description = re.sub(r'\s*\d+\s*(mg|ml|정|알|MG|ML)\s*', '', description, flags=re.IGNORECASE)
-        description = re.sub(r'[ \t]+', ' ', description)
-        description = re.sub(r'\n{3,}', '\n\n', description)
-        description = description.strip()
-
-        # 줄 단위로 정리해서 "무슨 약\n무슨 약\n무슨 약" 형태 보장
-        lines = [line.strip() for line in description.splitlines() if line.strip()]
-        description = "\n".join(lines)
+        # 위에서 만든 도우미 함수 재사용
+        desc_list = generate_descriptions_for_names(medication_names)
+        description = "\n".join(desc_list)
         
         return jsonify({
             'description': description,
