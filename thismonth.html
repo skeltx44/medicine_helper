@@ -56,7 +56,7 @@
         const now = new Date();
         let currentYear = now.getFullYear();
         let currentMonth = now.getMonth();
-        let dailyStatuses = {}; // 날짜별 복용 상태 저장
+        let dailyStatuses = {}; // 날짜별 복용 상태 저장 (YYYY-MM-DD 형식)
 
         // 일일 복용 상태 불러오기 (백엔드 /api/history/month 엔드포인트 사용)
         async function loadDailyStatuses(year, month) {
@@ -65,9 +65,14 @@
                 if (response.ok) {
                     const data = await response.json();
                     // 백엔드 응답에서 daily_status 추출
-                    dailyStatuses = data.daily_status || {};
+                    if (data && typeof data.daily_status === 'object') {
+                        dailyStatuses = data.daily_status;
+                    } else {
+                        console.warn('daily_status가 올바른 형식이 아닙니다:', data);
+                        dailyStatuses = {}; // 비정상 형식 시 빈 객체로 초기화
+                    }
                 } else {
-                    console.error('일일 상태 불러오기 실패:', response.status);
+                    console.error('일일 상태 불러오기 실패:', response.status, response.statusText);
                     dailyStatuses = {}; // 에러 시 빈 객체로 초기화
                 }
             } catch (error) {
@@ -78,41 +83,25 @@
 
         // 날짜에 O/X 표시 추가
         function addStatusMark(markContainer, status) {
-            if (!status) return;
+            // status가 없거나 유효하지 않으면 표시하지 않음
+            if (!status || (status !== 'O' && status !== 'X')) {
+                markContainer.innerHTML = '';
+                return;
+            }
             
             markContainer.innerHTML = '';
             
             if (status === 'O') {
+                // 완료 상태: 초록색 원 표시
                 const circleMark = document.createElement('div');
                 circleMark.className = 'mark-circle';
                 circleMark.textContent = '○';
-                circleMark.style.fontSize = '28px';
-                circleMark.style.color = '#4CAF50';
-                circleMark.style.fontWeight = '900';
-                circleMark.style.textAlign = 'center';
-                circleMark.style.lineHeight = '1';
-                circleMark.style.display = 'block';
-                circleMark.style.width = '100%';
-                circleMark.style.margin = '0';
-                circleMark.style.padding = '0';
-                circleMark.style.webkitTextStroke = '1px #4CAF50';
-                circleMark.style.textStroke = '1px #4CAF50';
                 markContainer.appendChild(circleMark);
             } else if (status === 'X') {
+                // 미완료 상태: 빨간색 X 표시
                 const crossMark = document.createElement('div');
                 crossMark.className = 'mark-cross';
                 crossMark.textContent = '✕';
-                crossMark.style.fontSize = '26px';
-                crossMark.style.color = '#f44336';
-                crossMark.style.fontWeight = 'bold';
-                crossMark.style.textAlign = 'center';
-                crossMark.style.lineHeight = '1';
-                crossMark.style.display = 'block';
-                crossMark.style.width = '100%';
-                crossMark.style.margin = '0';
-                crossMark.style.padding = '0';
-                crossMark.style.webkitTextStroke = '1px #f44336';
-                crossMark.style.textStroke = '1px #f44336';
                 markContainer.appendChild(crossMark);
             }
         }
@@ -190,7 +179,7 @@
                 // 날짜 문자열 생성 (YYYY-MM-DD 형식)
                 const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                 
-                // 저장된 상태가 있으면 표시, 없으면 기본값 'X'
+                // 저장된 상태가 있으면 표시, 없으면 기본값 'X' (daily_status에 없는 날짜는 미완료로 처리)
                 const status = dailyStatuses[dateStr] || 'X';
                 addStatusMark(markContainer, status);
                 

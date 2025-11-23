@@ -301,10 +301,13 @@ body {
 
 .calendar-day.today {
     background-color: rgba(194, 205, 255, 0.6);
+    border: 2px solid #5271ff;
+    box-shadow: 0 0 0 1px rgba(82, 113, 255, 0.3);
 }
 
 .calendar-day.today .day-number {
     color: #2c2c2c;
+    font-weight: 800;
 }
 
 .calendar-day.other-month {

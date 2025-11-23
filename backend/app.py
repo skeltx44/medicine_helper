@@ -19,17 +19,6 @@ print(f"[DEBUG] Flask 앱 생성됨: {app.name}")
 print(f"[DEBUG] Flask 앱 파일 위치: {__file__}")
 
 # OpenAI API 키 설정
-# 환경변수 OPENAI_API_KEY에서 가져옵니다
-# 
-# 로컬 개발 시:
-#   1. backend 폴더에 .env 파일 생성
-#   2. .env 파일에 다음 내용 추가: OPENAI_API_KEY=your-api-key-here
-#
-# Render 배포 시:
-#   1. Render 대시보드에서 프로젝트 선택
-#   2. Settings > Environment Variables 메뉴로 이동
-#   3. Key: OPENAI_API_KEY, Value: your-api-key-here 추가
-#   4. Save Changes 후 서비스 재배포
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not OPENAI_API_KEY:
@@ -71,7 +60,7 @@ def chat():
         
         # GPT API 호출
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # 또는 "gpt-3.5-turbo"
+            model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
@@ -97,7 +86,7 @@ def chat():
         # 마크다운 문법 제거 및 줄바꿈 정리
         import re
         bot_response = bot_response.replace('**', '').replace('*', '').replace('_', '')
-        bot_response = re.sub(r'\n{3,}', '\n\n', bot_response)  # 3개 이상 줄바꿈을 2개로
+        bot_response = re.sub(r'\n{3,}', '\n\n', bot_response)
         
         return jsonify({
             'response': bot_response
@@ -130,7 +119,7 @@ def ocr():
         
         # GPT Vision API를 사용하여 약봉지 정보 추출
         response = client.chat.completions.create(
-            model="gpt-4o",  # Vision 지원 모델
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system",
@@ -161,7 +150,7 @@ def ocr():
                         "- 위 스키마의 최상위 필드(name, dosage, days, before_meal, times)는 "
                         "medications 배열과 별개로 반드시 포함해야 합니다.\n"
                         "- before_meal 값은 특별한 경우가 아니라면 false로 설정해도 됩니다.\n"
-                        "- times 값은 null, 빈 배열, 또는 [\"아침\"], [\"점심\"], [\"저녁\"] 등으로 적어도 됩니다. "
+                        "- times 값은 null, 빈 배열, 또는 [\"아침\", \"점심\", \"저녁\"] 등으로 적어도 됩니다. "
                         "서버에서 dosage 값을 기준으로 실제 복용 시간대를 계산합니다.\n"
                         "- JSON 바깥에 다른 문장이나 설명을 절대 쓰지 말고, 오직 하나의 JSON 객체만 출력하세요."
                     )
@@ -219,7 +208,7 @@ def ocr():
                 'error': '약 정보를 추출할 수 없습니다. 다시 시도해주세요.'
             }), 400
         
-        # dosage와 days를 안전하게 정수로 변환 (null, 문자열 등 방어)
+        # dosage와 days를 안전하게 정수로 변환
         raw_dosage = medication_info.get("dosage", 1)
         try:
             dosage_value = int(raw_dosage)
@@ -240,7 +229,7 @@ def ocr():
         else:  # 1회 또는 그 외
             times_list = ["저녁"]
         
-        # 식후로 통일 (식전/식후 구분하지 않음)
+        # 식후로 통일
         before_meal = False
         
         # 식사 시간 정의 (기본값)
@@ -276,9 +265,9 @@ def ocr():
             "days": days_value,
             "before_meal": before_meal,
             "times": times_list,
-            "notification_times": notification_times,  # 알림 시간 추가
+            "notification_times": notification_times,
             "registered_date": datetime.now().isoformat(),
-            "image_base64": image_base64  # 나중에 필요할 수 있으므로 저장
+            "image_base64": image_base64
         }
         
         medications_db.append(medication_data)
@@ -349,17 +338,15 @@ def convert_medication_description():
     
     try:
         data = request.json
-        medication_names = data.get('names', [])  # 여러 약 이름 리스트
-        time_of_day = data.get('time', '아침')  # 아침, 점심, 저녁
+        medication_names = data.get('names', [])
+        time_of_day = data.get('time', '아침')
         
         if not medication_names or len(medication_names) == 0:
             return jsonify({'error': '약 이름이 필요합니다.'}), 400
         
-        # 여러 약 이름을 하나의 문자열로
         names_str = ', '.join(medication_names)
         num_meds = len(medication_names)
         
-        # 프롬프트 (줄 수 패딩 X, 없는 약 생성 X)
         prompt = f"""
 약 이름들: {names_str}
 약은 총 {num_meds}개입니다.
@@ -382,7 +369,7 @@ def convert_medication_description():
 - 한 설명 안에는 줄바꿈을 넣지 말고, 한 줄로만 작성하세요.
 - 마크다운 문법(**, *, _, -, 번호 매기기 등)은 절대 사용하지 마세요.
 
-예시 (약이 3개일 때, 실제 출력에서 '예시:' 라는 말은 쓰지 마세요):
+예시 (약이 3개일 때):
 작은 하얀색 둥근 약 1알
 조금 큰 노란색 타원형 약 1알
 길쭉한 파란색 캡슐 1알
@@ -414,15 +401,16 @@ def convert_medication_description():
         )
         
         description = response.choices[0].message.content
-        # 마크다운 문법 제거 및 정리
         import re
         description = description.replace('**', '').replace('*', '').replace('_', '')
-        # 용량 정보 제거
         description = re.sub(r'\s*\d+\s*(mg|ml|정|알|MG|ML)\s*', '', description, flags=re.IGNORECASE)
-        # 여러 공백을 하나로, 줄바꿈은 유지
         description = re.sub(r'[ \t]+', ' ', description)
-        description = re.sub(r'\n{3,}', '\n\n', description)  # 3개 이상 줄바꿈을 2개로
+        description = re.sub(r'\n{3,}', '\n\n', description)
         description = description.strip()
+
+        # 줄 단위로 정리해서 "무슨 약\n무슨 약\n무슨 약" 형태 보장
+        lines = [line.strip() for line in description.splitlines() if line.strip()]
+        description = "\n".join(lines)
         
         return jsonify({
             'description': description,
@@ -444,9 +432,7 @@ def get_today_medications():
         registered_date = datetime.fromisoformat(med['registered_date']).date()
         days_diff = (today - registered_date).days
         
-        # 등록일로부터 복용 기간 내에 있는지 확인
         if 0 <= days_diff < med['days']:
-            # 오늘 복용해야 하는 시간대 확인
             for time in med['times']:
                 today_medications.append({
                     'id': med['id'],
@@ -468,24 +454,49 @@ def complete_medication():
     try:
         data = request.json
         medication_id = data.get('medication_id')
-        time = data.get('time', '아침')  # 아침, 점심, 저녁
+        time = data.get('time', '아침')
         
         if not medication_id:
             return jsonify({'error': '약 ID가 필요합니다.'}), 400
+
+        # 해당 약 정보 조회 (여기서 이름을 쪼갬)
+        import re
+        medication = next((m for m in medications_db if m['id'] == medication_id), None)
+        name_parts = []
+
+        if medication and medication.get("name"):
+            raw_name = medication.get("name", "")
+            # 쉼표, 슬래시, 줄바꿈 기준으로 약 이름 나누기
+            name_parts = [part.strip() for part in re.split(r'[,\n/]+', raw_name) if part.strip()]
+
+        # 그래도 없으면 전체 이름 한 덩어리로
+        if not name_parts:
+            if medication and medication.get("name"):
+                name_parts = [medication["name"]]
+            else:
+                name_parts = [""]
+
+        new_records = []
+        today_str = datetime.now().date().isoformat()
+        now_iso = datetime.now().isoformat()
+
+        # 약 이름을 하나씩 나눠서 각각 기록 저장
+        for part_name in name_parts:
+            record = {
+                'medication_id': medication_id,
+                'time': time,
+                'completed_at': now_iso,
+                'date': today_str,
+                # 복약 내역 화면에서 블럭 하나에 약 하나씩 보여줄 수 있도록 개별 이름 저장
+                'medication_name': part_name
+            }
+            medication_history_db.append(record)
+            new_records.append(record)
         
-        # 복용 기록 저장
-        record = {
-            'medication_id': medication_id,
-            'time': time,
-            'completed_at': datetime.now().isoformat(),
-            'date': datetime.now().date().isoformat()
-        }
-        
-        medication_history_db.append(record)
-        
+        # 응답 형식은 그대로: record 한 개만 내려보내되, 첫 번째 것을 사용
         return jsonify({
             'success': True,
-            'record': record
+            'record': new_records[0]
         })
         
     except Exception as e:
@@ -562,7 +573,7 @@ def create_user():
             "phone": data.get("phone", ""),
             "guardian_phone": data.get("guardian_phone", ""),
             "created_at": datetime.now().isoformat(),
-            "type": data.get("type", "login")  # "login" or "signup"
+            "type": data.get("type", "login")
         }
         
         users_db.append(user_data)
@@ -588,7 +599,6 @@ def health_check():
 @app.route('/', methods=['GET'])
 def root():
     """루트 경로"""
-    # 등록된 모든 라우트 확인
     routes = []
     for rule in app.url_map.iter_rules():
         routes.append({
@@ -610,7 +620,6 @@ def root():
     })
 
 
-# 모든 경로에 대한 catch-all 핸들러 (디버깅용)
 @app.errorhandler(404)
 def not_found(error):
     """404 오류 처리 - 등록된 라우트 정보 반환"""
@@ -634,7 +643,6 @@ if __name__ == '__main__':
     print("백엔드 서버 시작...")
     print("주의: OPENAI_API_KEY 환경변수를 설정해주세요!")
     
-    # 등록된 모든 라우트 출력
     print("\n등록된 라우트:")
     for rule in app.url_map.iter_rules():
         print(f"  {rule.rule} [{', '.join(rule.methods)}]")

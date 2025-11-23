@@ -112,7 +112,12 @@
 
                         if (response.ok) {
                             const data = await response.json();
-                            let description = data.description;
+                            let description = data.description || '';
+                            
+                            // description이 없거나 비어있으면 fallback 사용
+                            if (!description || typeof description !== 'string') {
+                                throw new Error('약 설명이 없습니다');
+                            }
                             
                             // 설명 표시 (마크다운 제거)
                             description = description.replace(/\*\*/g, '').replace(/\*/g, '').replace(/_/g, '');
@@ -139,7 +144,7 @@
                             medicationDescription.innerHTML = `<p style="font-size: 20px; color: #333; text-align: center; padding: 15px; line-height: 1.8; font-weight: 500; white-space: pre-line;">${description}</p>`;
 
                             // 음성 안내 (Web Speech API 사용)
-                            if ('speechSynthesis' in window) {
+                            if ('speechSynthesis' in window && description) {
                                 const utterance = new SpeechSynthesisUtterance(description);
                                 utterance.lang = 'ko-KR';
                                 utterance.rate = 0.9;
@@ -195,16 +200,6 @@
                         });
                     });
                     localStorage.setItem('medication_history', JSON.stringify(history));
-
-                    // 일일 상태 업데이트 확인 (백엔드에서 자동으로 처리됨)
-                    // 추가로 프론트엔드에서도 확인
-                    const today = new Date().toISOString().split('T')[0];
-                    try {
-                        // 일일 상태 조회하여 확인
-                        await fetch(`${API_BASE_URL}/daily-status?date=${today}`);
-                    } catch (error) {
-                        console.error('일일 상태 확인 오류:', error);
-                    }
 
                     // 토스트 메시지 표시
                     toastMessage.classList.add('show');
