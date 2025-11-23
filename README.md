@@ -49,7 +49,7 @@ AI 기반 고령층 복약 도우미 서비스
 ## 📁 프로젝트 구조
 
 ```
-sibal/
+final/
 ├── backend/
 │   ├── app.py              # Flask 백엔드 서버
 │   ├── requirements.txt    # Python 패키지 목록
