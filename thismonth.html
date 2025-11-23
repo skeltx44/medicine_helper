@@ -179,8 +179,8 @@
                 // 날짜 문자열 생성 (YYYY-MM-DD 형식)
                 const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                 
-                // 저장된 상태가 있으면 표시, 없으면 기본값 'X' (daily_status에 없는 날짜는 미완료로 처리)
-                const status = dailyStatuses[dateStr] || 'X';
+                // daily_status에 있는 날짜만 O/X 표시, 나머지는 표시 없음
+                const status = dailyStatuses[dateStr];
                 addStatusMark(markContainer, status);
                 
                 calendarGrid.appendChild(dayElement);
