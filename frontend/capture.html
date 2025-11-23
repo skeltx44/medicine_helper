@@ -32,10 +32,12 @@
             
             <!-- File Upload Area -->
             <div class="camera-container" id="cameraContainer">
-                <input type="file" id="fileInput" accept="image/*" capture="environment" style="position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; z-index: -1;">
+                <input type="file" id="fileInput" accept="image/*" style="display: none;">
                 <div class="camera-placeholder" id="cameraPlaceholder">
                     <p>이미지 업로드 영역</p>
-                    <button type="button" class="upload-button" id="uploadButton">파일 선택</button>
+                    <label for="fileInput" class="upload-button" id="uploadButtonLabel">
+                        <button type="button" class="upload-button-inner" id="uploadButton">파일 선택</button>
+                    </label>
                 </div>
                 <!-- 선택된 이미지 미리보기 -->
                 <img id="previewImage" style="display: none; width: 100%; height: 100%; object-fit: contain; border-radius: 12px;" alt="선택된 이미지">
@@ -52,39 +54,26 @@
         let selectedImageUri = null;
         const fileInput = document.getElementById('fileInput');
         const uploadButton = document.getElementById('uploadButton');
+        const uploadButtonLabel = document.getElementById('uploadButtonLabel');
         const cameraPlaceholder = document.getElementById('cameraPlaceholder');
         const previewImage = document.getElementById('previewImage');
         const processButton = document.getElementById('processButton');
 
         // 파일 선택 버튼 클릭 이벤트 (모바일 대응)
         function triggerFileInput() {
-            // 모바일에서도 작동하도록 여러 방법 시도
+            // 가장 확실한 방법: 직접 클릭
             try {
-                // 직접 클릭
                 fileInput.click();
             } catch (e) {
                 console.error('파일 입력 클릭 오류:', e);
-                // 대안: 파일 input을 보이게 하고 직접 클릭 가능하게
-                fileInput.style.position = 'absolute';
-                fileInput.style.width = '100%';
-                fileInput.style.height = '100%';
-                fileInput.style.opacity = '0';
-                fileInput.style.zIndex = '1000';
-                fileInput.style.cursor = 'pointer';
-                setTimeout(() => {
-                    fileInput.click();
-                    setTimeout(() => {
-                        fileInput.style.position = 'absolute';
-                        fileInput.style.width = '1px';
-                        fileInput.style.height = '1px';
-                        fileInput.style.opacity = '0';
-                        fileInput.style.zIndex = '-1';
-                    }, 100);
-                }, 10);
+                // 대안: label 클릭
+                if (uploadButtonLabel) {
+                    uploadButtonLabel.click();
+                }
             }
         }
 
-        // 클릭 이벤트
+        // 버튼 클릭 시 파일 선택
         uploadButton.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -98,21 +87,10 @@
             triggerFileInput();
         });
 
-        // camera-placeholder 전체를 클릭 가능하게
-        cameraPlaceholder.addEventListener('click', (e) => {
-            if (e.target !== uploadButton) {
-                e.preventDefault();
-                e.stopPropagation();
-                triggerFileInput();
-            }
-        });
-
-        cameraPlaceholder.addEventListener('touchend', (e) => {
-            if (e.target !== uploadButton) {
-                e.preventDefault();
-                e.stopPropagation();
-                triggerFileInput();
-            }
+        // label 클릭 (가장 확실한 방법)
+        uploadButtonLabel.addEventListener('click', (e) => {
+            // label이 자동으로 input을 클릭하므로 추가 작업 불필요
+            e.stopPropagation();
         });
 
         // 파일 선택 이벤트
@@ -170,9 +148,9 @@
             reader.readAsDataURL(file);
         });
 
-        // 파일 input에 직접 클릭 이벤트 추가 (모바일 대응)
-        fileInput.addEventListener('click', (e) => {
-            e.stopPropagation();
+        // 파일 input 변경 감지 (디버깅)
+        fileInput.addEventListener('focus', () => {
+            console.log('파일 input 포커스됨');
         });
 
         // 백엔드 API URL 설정 (config.js에서 가져오거나 기본값 사용)
