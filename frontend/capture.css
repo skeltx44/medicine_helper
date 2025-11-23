@@ -152,6 +152,10 @@ body {
     top: 0;
     left: 0;
     gap: 20px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    z-index: 1;
 }
 
 .upload-button {
@@ -165,6 +169,12 @@ body {
     cursor: pointer;
     transition: background-color 0.2s, transform 0.2s;
     font-family: 'Noto Sans KR', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    z-index: 10;
 }
 
 .upload-button:hover {
@@ -174,6 +184,12 @@ body {
 
 .upload-button:active {
     transform: scale(0.95);
+    background-color: #2d4ad8;
+}
+
+.upload-button:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(81, 112, 255, 0.3);
 }
 
 /* Capture/Process Button */
